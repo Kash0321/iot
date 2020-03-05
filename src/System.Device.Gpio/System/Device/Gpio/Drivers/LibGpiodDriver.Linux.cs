@@ -19,6 +19,8 @@ namespace System.Device.Gpio.Drivers
 
         protected internal override int PinCount => Interop.libgpiod.gpiod_chip_num_lines(_chip);
 
+        private static string s_consumerName = System.Diagnostics.Process.GetCurrentProcess().ProcessName;
+
         public LibGpiodDriver(int gpioChip = 0)
         {
             try
@@ -157,14 +159,13 @@ namespace System.Device.Gpio.Drivers
             int requestResult = -1;
             if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out SafeLineHandle pinHandle))
             {
-                string consumer = pinNumber.ToString();
                 if (mode == PinMode.Input)
                 {
-                    requestResult = Interop.libgpiod.gpiod_line_request_input(pinHandle, consumer);
+                    requestResult = Interop.libgpiod.gpiod_line_request_input(pinHandle, s_consumerName);
                 }
                 else
                 {
-                    requestResult = Interop.libgpiod.gpiod_line_request_output(pinHandle, consumer);
+                    requestResult = Interop.libgpiod.gpiod_line_request_output(pinHandle, s_consumerName);
                 }
 
                 pinHandle.PinMode = mode;
@@ -192,18 +193,18 @@ namespace System.Device.Gpio.Drivers
                     eventHandler.ValueFalling += Callback;
                 }
 
-                bool eventOccured = false;
+                bool eventOccurred = false;
                 void Callback(object o, PinValueChangedEventArgs e)
                 {
-                    eventOccured = true;
+                    eventOccurred = true;
                 }
 
-                WaitForEventResult(cancellationToken, eventHandler.CancellationTokenSource.Token, ref eventOccured);
+                WaitForEventResult(cancellationToken, eventHandler.CancellationTokenSource.Token, ref eventOccurred);
                 RemoveCallbackForPinValueChangedEvent(pinNumber, Callback);
 
                 return new WaitForEventResult
                 {
-                    TimedOut = !eventOccured,
+                    TimedOut = !eventOccurred,
                     EventTypes = eventTypes
                 };
             }
@@ -213,9 +214,9 @@ namespace System.Device.Gpio.Drivers
             }
         }
 
-        private void WaitForEventResult(CancellationToken sourceToken, CancellationToken parentToken, ref bool eventOccured)
+        private void WaitForEventResult(CancellationToken sourceToken, CancellationToken parentToken, ref bool eventOccurred)
         {
-            while (!(sourceToken.IsCancellationRequested || parentToken.IsCancellationRequested || eventOccured))
+            while (!(sourceToken.IsCancellationRequested || parentToken.IsCancellationRequested || eventOccurred))
             {
                 Thread.Sleep(1);
             }
