@@ -7,6 +7,9 @@ using Xunit;
 
 namespace System.Device.Gpio.Tests
 {
+    [Trait("requirement", "root")]
+    [Trait("feature", "gpio")]
+    [Trait("feature", "gpio-rpi3")]
     public class RaspberryPiDriverTests : GpioControllerTestBase
     {
         /// <summary>
@@ -28,10 +31,19 @@ namespace System.Device.Gpio.Tests
             {
                 controller.OpenPin(OpenPin, PinMode.InputPullUp);
                 Assert.Equal(PinValue.High, controller.Read(OpenPin));
+
+                for (int i = 0; i < 100; i++)
+                {
+                    controller.SetPinMode(OpenPin, PinMode.InputPullDown);
+                    Assert.Equal(PinValue.Low, controller.Read(OpenPin));
+
+                    controller.SetPinMode(OpenPin, PinMode.InputPullUp);
+                    Assert.Equal(PinValue.High, controller.Read(OpenPin));
+                }
+
+                // change one more time so that when running test in a loop we start with the inverted option
                 controller.SetPinMode(OpenPin, PinMode.InputPullDown);
                 Assert.Equal(PinValue.Low, controller.Read(OpenPin));
-                controller.SetPinMode(OpenPin, PinMode.InputPullUp);
-                Assert.Equal(PinValue.High, controller.Read(OpenPin));
             }
         }
     }
