@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Device.Spi;
@@ -56,12 +55,7 @@ namespace Iot.Device.Max7219
         /// </summary>
         public Max7219(SpiDevice spiDevice, int cascadedDevices = 1, RotationType rotation = RotationType.None)
         {
-            if (spiDevice == null)
-            {
-                throw new ArgumentNullException(nameof(spiDevice));
-            }
-
-            _spiDevice = spiDevice;
+            _spiDevice = spiDevice ?? throw new ArgumentNullException(nameof(spiDevice));
             CascadedDevices = cascadedDevices;
             Rotation = rotation;
             _buffer = new byte[CascadedDevices, NumDigits];
@@ -102,10 +96,7 @@ namespace Iot.Device.Max7219
         /// <remarks>
         /// The size of the data should be 2 * cascaded devices.
         /// </remarks>
-        private void Write(Span<byte> data)
-        {
-            _spiDevice.Write(data);
-        }
+        private void Write(Span<byte> data) => _spiDevice.Write(data);
 
         /// <summary>
         /// Sets the brightness of all cascaded devices to the same intensity level.
@@ -188,10 +179,7 @@ namespace Iot.Device.Max7219
         /// <summary>
         /// Writes all the Values to the devices.
         /// </summary>
-        public void Flush()
-        {
-            WriteBuffer(_buffer);
-        }
+        public void Flush() => WriteBuffer(_buffer);
 
         /// <summary>
         /// Writes a two dimensional buffer containing all the values to the devices.
@@ -328,19 +316,17 @@ namespace Iot.Device.Max7219
         {
             if (buffer.Rank != 2)
             {
-                throw new ArgumentException(nameof(buffer), $"buffer must be two dimensional.");
+                throw new ArgumentException($"buffer must be two dimensional.", nameof(buffer));
             }
 
             if (buffer.GetUpperBound(0) != CascadedDevices - 1)
             {
-                throw new ArgumentException(nameof(buffer),
-                    $"buffer upper bound ({buffer.GetUpperBound(0)}) for dimension 0 must be {CascadedDevices - 1}.");
+                throw new ArgumentException($"buffer upper bound ({buffer.GetUpperBound(0)}) for dimension 0 must be {CascadedDevices - 1}.", nameof(buffer));
             }
 
             if (buffer.GetUpperBound(1) != NumDigits - 1)
             {
-                throw new ArgumentException(nameof(buffer),
-                    $"buffer upper bound ({buffer.GetUpperBound(1)}) for dimension 1 must be {NumDigits - 1}.");
+                throw new ArgumentException($"buffer upper bound ({buffer.GetUpperBound(1)}) for dimension 1 must be {NumDigits - 1}.", nameof(buffer));
             }
         }
 
@@ -376,19 +362,13 @@ namespace Iot.Device.Max7219
         /// <summary>
         /// Clears the buffer from the given start to end and flushes
         /// </summary>
-        public void ClearAll(bool flush = true)
-        {
-            Clear(0, CascadedDevices, flush);
-        }
+        public void ClearAll(bool flush = true) => Clear(0, CascadedDevices, flush);
 
         /// <inheritdoc/>
         public void Dispose()
         {
-            if (_spiDevice != null)
-            {
-                _spiDevice.Dispose();
-                _spiDevice = null;
-            }
+            _spiDevice?.Dispose();
+            _spiDevice = null!;
         }
     }
 }

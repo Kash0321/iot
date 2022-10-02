@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Collections.Generic;
@@ -59,7 +58,7 @@ namespace Iot.Device.Seesaw
         {
             if (pinNumber < 0 || pinNumber > 63)
             {
-                throw new ArgumentOutOfRangeException("Gpio pin must be within 0-63 range.");
+                throw new ArgumentOutOfRangeException(nameof(pinNumber), "Gpio pin must be within 0-63 range.");
             }
 
             if (!IsPinOpen(pinNumber))
@@ -79,7 +78,7 @@ namespace Iot.Device.Seesaw
         {
             if (pinNumber < 0 || pinNumber > 63)
             {
-                throw new ArgumentOutOfRangeException("Gpio pin must be within 0-63 range.");
+                throw new ArgumentOutOfRangeException(nameof(pinNumber), "Gpio pin must be within 0-63 range.");
             }
 
             if (!IsPinOpen(pinNumber))
@@ -101,7 +100,7 @@ namespace Iot.Device.Seesaw
         {
             if (pinNumber < 0 || pinNumber > 63)
             {
-                throw new ArgumentOutOfRangeException("Gpio pin must be within 0-63 range.");
+                throw new ArgumentOutOfRangeException(nameof(pinNumber), "Gpio pin must be within 0-63 range.");
             }
 
             return true;
@@ -116,7 +115,7 @@ namespace Iot.Device.Seesaw
         {
             if (pinNumber < 0 || pinNumber > 63)
             {
-                throw new ArgumentOutOfRangeException("Gpio pin must be within 0-63 range.");
+                throw new ArgumentOutOfRangeException(nameof(pinNumber), "Gpio pin must be within 0-63 range.");
             }
 
             return _openPins.ContainsKey(pinNumber);
@@ -137,7 +136,7 @@ namespace Iot.Device.Seesaw
         {
             if (pinNumber < 0 || pinNumber > 63)
             {
-                throw new ArgumentOutOfRangeException("Gpio pin must be within 0-63 range.");
+                throw new ArgumentOutOfRangeException(nameof(pinNumber), "Gpio pin must be within 0-63 range.");
             }
 
             if (IsPinOpen(pinNumber))
@@ -158,7 +157,7 @@ namespace Iot.Device.Seesaw
         {
             if (pinNumber < 0 || pinNumber > 63)
             {
-                throw new ArgumentOutOfRangeException("Gpio pin must be within 0-63 range.");
+                throw new ArgumentOutOfRangeException(nameof(pinNumber), "Gpio pin must be within 0-63 range.");
             }
 
             if (!IsPinOpen(pinNumber))
@@ -190,7 +189,7 @@ namespace Iot.Device.Seesaw
         {
             if (pinNumber < 0 || pinNumber > 63)
             {
-                throw new ArgumentOutOfRangeException("Gpio pin must be within 0-63 range.");
+                throw new ArgumentOutOfRangeException(nameof(pinNumber), "Gpio pin must be within 0-63 range.");
             }
 
             if (!_openPins.ContainsKey(pinNumber))
@@ -211,7 +210,7 @@ namespace Iot.Device.Seesaw
         {
             if (pinNumber < 0 || pinNumber > 63)
             {
-                throw new ArgumentOutOfRangeException("Gpio pin must be within 0-63 range.");
+                throw new ArgumentOutOfRangeException(nameof(pinNumber), "Gpio pin must be within 0-63 range.");
             }
 
             if (!IsPinOpen(pinNumber))
@@ -256,7 +255,7 @@ namespace Iot.Device.Seesaw
 
             _openPins.Clear();
             _seesawDevice?.Dispose();
-            _seesawDevice = null;
+            _seesawDevice = null!;
             base.Dispose(disposing);
         }
     }

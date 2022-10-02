@@ -1,28 +1,33 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
+using System.Collections.Generic;
 using System.Device;
 using System.Device.Gpio;
 using System.Device.I2c;
+using System.Device.Model;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
-using Iot.Units;
+using Iot.Device.Common;
+using UnitsNet;
 
 namespace Iot.Device.DHTxx
 {
     /// <summary>
     /// Temperature and Humidity Sensor DHTxx
     /// </summary>
+    [Interface("Temperature and Humidity Sensor DHTxx")]
     public abstract class DhtBase : IDisposable
     {
+        private const int BufferSize = 5;
+        private readonly CommunicationProtocol _protocol;
+
         /// <summary>
         /// Read buffer
         /// </summary>
-        protected byte[] _readBuff = new byte[5];
-
-        private readonly CommunicationProtocol _protocol;
+        private byte[] _readBuff = new byte[BufferSize];
 
         /// <summary>
         /// GPIO pin
@@ -30,37 +35,53 @@ namespace Iot.Device.DHTxx
         protected readonly int _pin;
 
         /// <summary>
+        /// True to dispose the Gpio Controller
+        /// </summary>
+        protected readonly bool _shouldDispose;
+
+        /// <summary>
         /// I2C device used to communicate with the device
         /// </summary>
-        protected readonly I2cDevice _i2cDevice;
+        protected I2cDevice? _i2cDevice;
 
         /// <summary>
         /// <see cref="GpioController"/> related with the <see cref="_pin"/>.
         /// </summary>
-        protected readonly GpioController _controller;
+        protected GpioController? _controller;
 
         // wait about 1 ms
         private readonly uint _loopCount = 10000;
         private readonly Stopwatch _stopwatch = new Stopwatch();
         private int _lastMeasurement = 0;
+        private TimeSpan _minTimeBetweenReads;
+
+        /// <summary>
+        /// True when the last read values are valid
+        /// </summary>
+        protected bool _isLastReadSuccessful;
 
         /// <summary>
         /// How last read went, <c>true</c> for success, <c>false</c> for failure
         /// </summary>
-        public bool IsLastReadSuccessful { get; internal set; }
+        [Obsolete("This property will be removed in a future release.")]
+        public bool IsLastReadSuccessful
+        {
+            get => _isLastReadSuccessful;
+        }
 
         /// <summary>
         /// Get the last read temperature
         /// </summary>
         /// <remarks>
-        /// If last read was not successfull, it returns double.NaN
+        /// If last read was not successful, it returns <code>default(Temperature)</code>
         /// </remarks>
+        [Obsolete("This property will be removed in the a future release. Use TryGetTemperature instead.")]
         public virtual Temperature Temperature
         {
             get
             {
-                ReadData();
-                return IsLastReadSuccessful ? GetTemperature(_readBuff) : Temperature.FromCelsius(double.NaN);
+                var buf = ReadData();
+                return IsLastReadSuccessful ? GetTemperature(buf) : default(Temperature);
             }
         }
 
@@ -68,14 +89,36 @@ namespace Iot.Device.DHTxx
         /// Get the last read of relative humidity in percentage
         /// </summary>
         /// <remarks>
-        /// If last read was not successfull, it returns double.NaN
+        /// If last read was not successful, it returns <code>default(RelativeHumidity)</code>
         /// </remarks>
-        public virtual double Humidity
+        [Obsolete("This property will be removed in a future release. Use TryGetHumidity instead.")]
+        public virtual RelativeHumidity Humidity
         {
             get
             {
-                ReadData();
-                return IsLastReadSuccessful ? GetHumidity(_readBuff) : double.NaN;
+                var buf = ReadData();
+                return IsLastReadSuccessful ? GetHumidity(buf) : default(RelativeHumidity);
+            }
+        }
+
+        /// <summary>
+        /// Gets or sets the minimum time between sensor reads.
+        /// When querying the sensor faster than this, the last values will be returned (whether valid or not)
+        /// </summary>
+        public TimeSpan MinTimeBetweenReads
+        {
+            get
+            {
+                return _minTimeBetweenReads;
+            }
+            set
+            {
+                if (value <= TimeSpan.Zero)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(value), "Minimum time between reads must be larger than zero");
+                }
+
+                _minTimeBetweenReads = value;
             }
         }
 
@@ -84,12 +127,17 @@ namespace Iot.Device.DHTxx
         /// </summary>
         /// <param name="pin">The pin number (GPIO number)</param>
         /// <param name="pinNumberingScheme">The GPIO pin numbering scheme</param>
-        public DhtBase(int pin, PinNumberingScheme pinNumberingScheme = PinNumberingScheme.Logical)
+        /// <param name="gpioController"><see cref="GpioController"/> related with operations on pins</param>
+        /// <param name="shouldDispose">True to dispose the Gpio Controller</param>
+        public DhtBase(int pin, PinNumberingScheme pinNumberingScheme = PinNumberingScheme.Logical, GpioController? gpioController = null, bool shouldDispose = true)
         {
             _protocol = CommunicationProtocol.OneWire;
-            _controller = new GpioController(pinNumberingScheme);
+            _shouldDispose = shouldDispose || gpioController is null;
+            _controller = gpioController ?? new GpioController(pinNumberingScheme);
             _pin = pin;
 
+            // These sensors typically require 2.5 seconds between read attempts, or the result will be garbage
+            MinTimeBetweenReads = TimeSpan.FromSeconds(2.5);
             _controller.OpenPin(_pin);
             // delay 1s to make sure DHT stable
             Thread.Sleep(1000);
@@ -106,33 +154,42 @@ namespace Iot.Device.DHTxx
         }
 
         /// <summary>
-        /// Start a reading
+        /// Read data from the sensor. Returns the last read value if the last read operation was too close.
         /// </summary>
-        internal virtual void ReadData()
+        /// <returns>The raw data last read</returns>
+        internal virtual byte[] ReadData()
         {
             // The time of two measurements should be more than 1s.
-            if (Environment.TickCount - _lastMeasurement < 1000)
+            if (Environment.TickCount - _lastMeasurement < MinTimeBetweenReads.Milliseconds)
             {
-                return;
+                return _readBuff;
             }
 
             if (_protocol == CommunicationProtocol.OneWire)
             {
-                ReadThroughOneWire();
+                _readBuff = ReadThroughOneWire();
             }
             else
             {
-                ReadThroughI2c();
+                _readBuff = ReadThroughI2c();
             }
+
+            return _readBuff;
         }
 
         /// <summary>
         /// Read through One-Wire
         /// </summary>
-        internal virtual void ReadThroughOneWire()
+        internal virtual byte[] ReadThroughOneWire()
         {
+            if (_controller is null)
+            {
+                throw new Exception("GPIO controller is not configured.");
+            }
+
             byte readVal = 0;
             uint count;
+            var pinMode = _controller.IsPinModeSupported(_pin, PinMode.InputPullUp) ? PinMode.InputPullUp : PinMode.Input;
 
             // keep data line HIGH
             _controller.SetPinMode(_pin, PinMode.Output);
@@ -150,16 +207,17 @@ namespace Iot.Device.DHTxx
             // wait 20 - 40 microseconds
             DelayHelper.DelayMicroseconds(30, true);
 
-            _controller.SetPinMode(_pin, PinMode.InputPullUp);
+            _controller.SetPinMode(_pin, pinMode);
 
             // DHT corresponding signal - LOW - about 80 microseconds
             count = _loopCount;
+            byte[] newBuf = new byte[BufferSize];
             while (_controller.Read(_pin) == PinValue.Low)
             {
                 if (count-- == 0)
                 {
-                    IsLastReadSuccessful = false;
-                    return;
+                    _isLastReadSuccessful = false;
+                    return newBuf;
                 }
             }
 
@@ -169,8 +227,8 @@ namespace Iot.Device.DHTxx
             {
                 if (count-- == 0)
                 {
-                    IsLastReadSuccessful = false;
-                    return;
+                    _isLastReadSuccessful = false;
+                    return newBuf;
                 }
             }
 
@@ -183,8 +241,8 @@ namespace Iot.Device.DHTxx
                 {
                     if (count-- == 0)
                     {
-                        IsLastReadSuccessful = false;
-                        return;
+                        _isLastReadSuccessful = false;
+                        return newBuf;
                     }
                 }
 
@@ -196,8 +254,8 @@ namespace Iot.Device.DHTxx
                 {
                     if (count-- == 0)
                     {
-                        IsLastReadSuccessful = false;
-                        return;
+                        _isLastReadSuccessful = false;
+                        return newBuf;
                     }
                 }
 
@@ -214,42 +272,98 @@ namespace Iot.Device.DHTxx
 
                 if (((i + 1) % 8) == 0)
                 {
-                    _readBuff[i / 8] = readVal;
+                    newBuf[i / 8] = readVal;
                 }
             }
 
             _lastMeasurement = Environment.TickCount;
 
-            if ((_readBuff[4] == ((_readBuff[0] + _readBuff[1] + _readBuff[2] + _readBuff[3]) & 0xFF)))
+            if ((newBuf[4] == ((newBuf[0] + newBuf[1] + newBuf[2] + newBuf[3]) & 0xFF)))
             {
-                IsLastReadSuccessful = (_readBuff[0] != 0) || (_readBuff[2] != 0);
+                _isLastReadSuccessful = (newBuf[0] != 0) || (newBuf[2] != 0);
             }
             else
             {
-                IsLastReadSuccessful = false;
+                _isLastReadSuccessful = false;
             }
+
+            return newBuf;
         }
 
         /// <summary>
         /// Read through I2C
         /// </summary>
-        internal virtual void ReadThroughI2c()
+        internal virtual byte[] ReadThroughI2c()
         {
+            if (_i2cDevice is null)
+            {
+                throw new Exception("I2C device is not configured");
+            }
+
             // DHT12 Humidity Register
             _i2cDevice.WriteByte(0x00);
             // humidity int, humidity decimal, temperature int, temperature decimal, checksum
-            _i2cDevice.Read(_readBuff);
+            byte[] newBuf = new byte[BufferSize];
+            _i2cDevice.Read(newBuf.AsSpan());
 
             _lastMeasurement = Environment.TickCount;
 
-            if ((_readBuff[4] == ((_readBuff[0] + _readBuff[1] + _readBuff[2] + _readBuff[3]) & 0xFF)))
+            if ((newBuf[4] == ((newBuf[0] + newBuf[1] + newBuf[2] + newBuf[3]) & 0xFF)))
             {
-                IsLastReadSuccessful = (_readBuff[0] != 0) || (_readBuff[2] != 0);
+                _isLastReadSuccessful = (newBuf[0] != 0) || (newBuf[2] != 0);
             }
             else
             {
-                IsLastReadSuccessful = false;
+                _isLastReadSuccessful = false;
             }
+
+            return newBuf;
+        }
+
+        /// <summary>
+        /// Returns the current temperature
+        /// </summary>
+        /// <param name="temperature">[Out] The current temperature on success</param>
+        /// <returns>True on success, false if reading failed</returns>
+        [Telemetry("Temperature")]
+        public bool TryReadTemperature(
+#if NET5_0_OR_GREATER
+        [NotNullWhen(true)]
+#endif
+        out Temperature temperature)
+        {
+            temperature = default;
+            var buf = ReadData();
+            if (_isLastReadSuccessful)
+            {
+                temperature = GetTemperature(buf);
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Returns the current relative humidity
+        /// </summary>
+        /// <param name="humidity">[Out] The current relative humidity on success</param>
+        /// <returns>True on success, false if reading failed</returns>
+        [Telemetry("Humidity")]
+        public bool TryReadHumidity(
+#if NET5_0_OR_GREATER
+            [NotNullWhen(true)]
+#endif
+            out RelativeHumidity humidity)
+        {
+            humidity = default;
+            var buf = ReadData();
+            if (_isLastReadSuccessful)
+            {
+                humidity = GetHumidity(buf);
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -257,20 +371,30 @@ namespace Iot.Device.DHTxx
         /// </summary>
         /// <param name="readBuff">Data</param>
         /// <returns>Humidity</returns>
-        internal abstract double GetHumidity(byte[] readBuff);
+        internal abstract RelativeHumidity GetHumidity(Span<byte> readBuff);
 
         /// <summary>
         /// Converting data to Temperature
         /// </summary>
         /// <param name="readBuff">Data</param>
         /// <returns>Temperature</returns>
-        internal abstract Temperature GetTemperature(byte[] readBuff);
+        internal abstract Temperature GetTemperature(Span<byte> readBuff);
 
         /// <inheritdoc/>
         public void Dispose()
         {
-            _controller?.Dispose();
+            if (_shouldDispose)
+            {
+                _controller?.Dispose();
+                _controller = null;
+            }
+            else if (_controller?.IsPinOpen(_pin) ?? false)
+            {
+                _controller.ClosePin(_pin);
+            }
+
             _i2cDevice?.Dispose();
+            _i2cDevice = null;
         }
     }
 }

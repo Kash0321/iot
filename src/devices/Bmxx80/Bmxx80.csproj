@@ -1,11 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFrameworks>$(DefaultBindingTfms)</TargetFrameworks>
     <EnableDefaultItems>false</EnableDefaultItems>
-    <LangVersion>8.0</LangVersion>
   </PropertyGroup>
-
   <ItemGroup>
     <Compile Include="Bme280.cs" />
     <Compile Include="Bme680.cs" />
@@ -24,18 +21,16 @@
     <Compile Include="FilteringMode\Bmx280FilteringMode.cs" />
     <Compile Include="PowerMode\Bme680PowerMode.cs" />
     <Compile Include="PowerMode\Bmx280PowerMode.cs" />
+    <Compile Include="ReadResult\Bme280ReadResult.cs" />
+    <Compile Include="ReadResult\Bme680ReadResult.cs" />
+    <Compile Include="ReadResult\Bmp280ReadResult.cs" />
     <Compile Include="Register\Bme680Register.cs" />
     <Compile Include="Register\Bmx280Register.cs" />
     <Compile Include="Register\Bmxx80Register.cs" />
     <Compile Include="Register\Bme280Register.cs" />
     <Compile Include="Sampling.cs" />
     <Compile Include="StandbyTime.cs" />
-    <ProjectReference Include="$(MainLibraryPath)System.Device.Gpio.csproj">
-      <AdditionalProperties>$(AdditionalProperties);RuntimeIdentifier=linux</AdditionalProperties>
-    </ProjectReference>
-    <ProjectReference Include="..\Units\Units.csproj" />
   </ItemGroup>
-
   <ItemGroup>
     <None Remove="README.md" />
   </ItemGroup>

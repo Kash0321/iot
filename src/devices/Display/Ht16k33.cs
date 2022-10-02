@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Device.I2c;
@@ -140,7 +139,7 @@ namespace Iot.Device.Display
 
                 if (value > MaxBrightness)
                 {
-                    throw new ArgumentOutOfRangeException(nameof(Brightness), $"Brightness must be between 0 and {MaxBrightness}");
+                    throw new ArgumentOutOfRangeException(nameof(value), $"Brightness must be between 0 and {MaxBrightness}");
                 }
 
                 _brightness = value;
@@ -163,9 +162,9 @@ namespace Iot.Device.Display
                     return;
                 }
 
-                if (!Enum.IsDefined(typeof(BlinkRate), _blinkRate))
+                if (!Enum.IsDefined(typeof(BlinkRate), value))
                 {
-                    throw new ArgumentOutOfRangeException(nameof(_blinkRate));
+                    throw new ArgumentOutOfRangeException(nameof(value));
                 }
 
                 _blinkRate = value;
@@ -197,7 +196,7 @@ namespace Iot.Device.Display
         public void Dispose()
         {
             _i2cDevice?.Dispose();
-            _i2cDevice = null;
+            _i2cDevice = null!;
         }
 
         #region Abstract members

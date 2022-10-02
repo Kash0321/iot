@@ -1,11 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFrameworks>$(DefaultBindingTfms)</TargetFrameworks>
     <EnableDefaultItems>false</EnableDefaultItems>
-    <LangVersion>Latest</LangVersion>
   </PropertyGroup>
-
   <ItemGroup>
     <Compile Include="CommunicationProtocol.cs" />
     <Compile Include="Devices\Dht10.cs" />
@@ -14,15 +11,8 @@
     <Compile Include="Devices\Dht21.cs" />
     <Compile Include="Devices\Dht22.cs" />
     <Compile Include="DhtBase.cs" />
-    <Compile Include="..\Common\System\Device\DelayHelper.cs" />
   </ItemGroup>
-
   <ItemGroup>
-    <ProjectReference Include="$(MainLibraryPath)System.Device.Gpio.csproj">
-      <AdditionalProperties>$(AdditionalProperties);RuntimeIdentifier=linux</AdditionalProperties>
-    </ProjectReference>
-    <ProjectReference Include="..\Units\Units.csproj" />
     <None Include="README.md" />
   </ItemGroup>
-
 </Project>

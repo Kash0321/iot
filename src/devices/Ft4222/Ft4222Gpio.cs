@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Device.Gpio;
@@ -8,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
+using Iot.Device.FtCommon;
 
 namespace Iot.Device.Ft4222
 {
@@ -21,8 +21,8 @@ namespace Iot.Device.Ft4222
         private SafeFtHandle _ftHandle;
         private GpioPinMode[] _gpioDirections = new GpioPinMode[PinCountConst];
         private GpioTrigger[] _gpioTriggers = new GpioTrigger[PinCountConst];
-        private PinChangeEventHandler[] _pinRisingHandlers = new PinChangeEventHandler[PinCountConst];
-        private PinChangeEventHandler[] _pinFallingHandlers = new PinChangeEventHandler[PinCountConst];
+        private PinChangeEventHandler?[] _pinRisingHandlers = new PinChangeEventHandler[PinCountConst];
+        private PinChangeEventHandler?[] _pinFallingHandlers = new PinChangeEventHandler[PinCountConst];
 
         /// <inheritdoc/>
         protected override int PinCount => PinCountConst;
@@ -30,16 +30,29 @@ namespace Iot.Device.Ft4222
         /// <summary>
         /// Store the FTDI Device Information
         /// </summary>
-        public DeviceInformation DeviceInformation { get; internal set; }
+        public Ft4222Device DeviceInformation { get; internal set; }
+
+        /// <summary>
+        /// Create a FT4222 GPIO driver
+        /// </summary>
+        /// <param name="device">An FT Device</param>
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
+        internal Ft4222Gpio(Ft4222Device device)
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
+        {
+            InitializeGpio(device);
+        }
 
         /// <summary>
         /// Create a FT4222 GPIO driver
         /// </summary>
         /// <param name="deviceNumber">Number of the device in the device list, default 0</param>
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
         public Ft4222Gpio(int deviceNumber = 0)
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
         {
             // Check device
-            var devInfos = FtCommon.GetDevices();
+            var devInfos = FtCommon.FtCommon.GetDevices();
             if (devInfos.Count == 0)
             {
                 throw new IOException("No FTDI device available");
@@ -47,7 +60,7 @@ namespace Iot.Device.Ft4222
 
             // Select the deviceNumber, only the last one in Mode 0 and Mode 1 can be open.
             // The last one is either B if in Mode 0 or D in mode 1.
-            string strMode = devInfos[0].Type == FtDevice.Ft4222HMode1or2With4Interfaces ? "FT4222 D" : "FT4222 B";
+            string strMode = devInfos[0].Type == FtDeviceType.Ft4222HMode1or2With4Interfaces ? "FT4222 D" : "FT4222 B";
 
             var devInfo = devInfos.Where(m => m.Description == strMode).ToArray();
             if ((devInfo.Length == 0) || (devInfo.Length < deviceNumber))
@@ -55,7 +68,12 @@ namespace Iot.Device.Ft4222
                 throw new IOException($"Can't find a device to open GPIO on index {deviceNumber}");
             }
 
-            DeviceInformation = devInfo[deviceNumber];
+            InitializeGpio(new(devInfo[deviceNumber]));
+        }
+
+        private void InitializeGpio(Ft4222Device device)
+        {
+            DeviceInformation = device;
             // Open device
             var ftStatus = FtFunction.FT_OpenEx(DeviceInformation.LocId, FtOpenType.OpenByLocation, out _ftHandle);
 
@@ -126,7 +144,7 @@ namespace Iot.Device.Ft4222
         {
             if (eventTypes == PinEventTypes.None)
             {
-                throw new ArgumentException($"{PinEventTypes.None} is an invalid value.", nameof(eventTypes));
+                throw new ArgumentException($"{nameof(PinEventTypes.None)} is an invalid value.", nameof(eventTypes));
             }
 
             if (eventTypes.HasFlag(PinEventTypes.Falling))
@@ -149,12 +167,12 @@ namespace Iot.Device.Ft4222
         {
             _pinFallingHandlers[pinNumber] -= callback;
             _pinRisingHandlers[pinNumber] -= callback;
-            if (_pinFallingHandlers == null)
+            if (_pinFallingHandlers is null)
             {
                 _gpioTriggers[pinNumber] &= ~GpioTrigger.Falling;
             }
 
-            if (_pinRisingHandlers == null)
+            if (_pinRisingHandlers is null)
             {
                 _gpioTriggers[pinNumber] &= ~GpioTrigger.Rising;
             }
@@ -176,7 +194,7 @@ namespace Iot.Device.Ft4222
 
                 if (queueSize > 0)
                 {
-                    Span<GpioTrigger> gpioTriggers = stackalloc GpioTrigger[queueSize];
+                    Span<GpioTrigger> gpioTriggers = new GpioTrigger[queueSize];
                     ushort readTrigger;
                     ftStatus = FtFunction.FT4222_GPIO_ReadTriggerQueue(_ftHandle, (GpioPort)pinNumber, in MemoryMarshal.GetReference(gpioTriggers), queueSize, out readTrigger);
                     if (ftStatus != FtStatus.Ok)

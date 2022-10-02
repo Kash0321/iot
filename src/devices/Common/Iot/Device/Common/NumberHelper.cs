@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 
@@ -9,17 +8,14 @@ namespace Iot.Device.Common
     /// <summary>
     /// Helpers for number.
     /// </summary>
-    internal static class NumberHelper
+    static partial class NumberHelper
     {
         /// <summary>
         /// BCD To decimal
         /// </summary>
         /// <param name="bcd">BCD Code</param>
         /// <returns>decimal</returns>
-        public static int Bcd2Dec(byte bcd)
-        {
-            return ((bcd >> 4) * 10) + (bcd % 16);
-        }
+        public static int Bcd2Dec(byte bcd) => ((bcd >> 4) * 10) + (bcd % 16);
 
         /// <summary>
         /// BCD To decimal
@@ -47,7 +43,7 @@ namespace Iot.Device.Common
         {
             if ((dec > 99) || (dec < 0))
             {
-                throw new ArgumentException($"{nameof(dec)}, encoding value can't be more than 99");
+                throw new ArgumentException("Value must be between 0-99.", nameof(dec));
             }
 
             return (byte)(((dec / 10) << 4) + (dec % 10));

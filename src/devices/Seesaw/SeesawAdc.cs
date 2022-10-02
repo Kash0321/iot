@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Buffers.Binary;
@@ -25,7 +24,7 @@ namespace Iot.Device.Seesaw
 
             if (pin < 2 || pin > 5)
             {
-                throw new ArgumentOutOfRangeException("ADC pin must be within 2-5 range.");
+                throw new ArgumentOutOfRangeException(nameof(pin), "ADC pin must be within 2-5 range.");
             }
 
             return BinaryPrimitives.ReadUInt16BigEndian(Read(SeesawModule.Adc, SeesawFunction.AdcChannelOffset + pin - 2, 2, AdcConversionDelayMicroseconds));

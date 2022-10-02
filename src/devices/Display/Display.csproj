@@ -1,12 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFrameworks>$(DefaultBindingTfms)</TargetFrameworks>
     <EnableDefaultItems>false</EnableDefaultItems>
-    <LangVersion>preview</LangVersion>
-    <RootNamespace>Iot.Device.Display</RootNamespace>
   </PropertyGroup>
-
   <ItemGroup>
     <Compile Include="Alignment.cs" />
     <Compile Include="BlinkRate.cs" />
@@ -17,13 +13,10 @@
     <Compile Include="FontHelper.cs" />
     <Compile Include="ISevenSegmentDisplay.cs" />
     <Compile Include="Large4Digit7SegmentDisplay.cs" />
+    <Compile Include="BiColorBarGraph.cs" />
+    <Compile Include="BarColor.cs" />
   </ItemGroup>
-
   <ItemGroup>
-    <ProjectReference Include="$(MainLibraryPath)System.Device.Gpio.csproj">
-      <AdditionalProperties>$(AdditionalProperties);RuntimeIdentifier=linux</AdditionalProperties>
-    </ProjectReference>
     <None Include="README.md" />
   </ItemGroup>
-
 </Project>

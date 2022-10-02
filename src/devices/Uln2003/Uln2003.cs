@@ -1,4 +1,7 @@
-﻿using System;
+﻿// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
+using System;
 using System.Device.Gpio;
 using System.Diagnostics;
 
@@ -14,20 +17,6 @@ namespace Iot.Device.Uln2003
         /// Default delay in microseconds.
         /// </summary>
         private const long StepperMotorDefaultDelay = 1000;
-
-        private int _pin1;
-        private int _pin2;
-        private int _pin3;
-        private int _pin4;
-        private int _steps = 0;
-        private int _engineStep = 0;
-        private int _currentStep = 0;
-        private StepperMode _mode = StepperMode.HalfStep;
-        private bool[,] _currentSwitchingSequence = _halfStepSequence;
-        private bool _isClockwise = true;
-        private GpioController _controller;
-        private Stopwatch _stopwatch = new Stopwatch();
-        private long _stepMicrosecondsDelay;
 
         private static bool[,] _halfStepSequence = new bool[4, 8]
         {
@@ -53,6 +42,23 @@ namespace Iot.Device.Uln2003
             { false, false, true, true, false, false, true, true }
         };
 
+        private int _pin1;
+        private int _pin2;
+        private int _pin3;
+        private int _pin4;
+        private int _steps = 0;
+        private int _engineStep = 0;
+        private int _currentStep = 0;
+        private int _stepsToRotate = 4096;
+        private int _stepsToRotateInMode = 4096;
+        private StepperMode _mode = StepperMode.HalfStep;
+        private bool[,] _currentSwitchingSequence = _halfStepSequence;
+        private bool _isClockwise = true;
+        private GpioController _controller;
+        private bool _shouldDispose;
+        private Stopwatch _stopwatch = new Stopwatch();
+        private long _stepMicrosecondsDelay;
+
         /// <summary>
         /// Initialize a Uln2003 class.
         /// </summary>
@@ -61,7 +67,9 @@ namespace Iot.Device.Uln2003
         /// <param name="pin3">The GPIO pin number which corresponds pin C on ULN2003 driver board.</param>
         /// <param name="pin4">The GPIO pin number which corresponds pin D on ULN2003 driver board.</param>
         /// <param name="controller">The controller.</param>
-        public Uln2003(int pin1, int pin2, int pin3, int pin4, GpioController controller = null)
+        /// <param name="shouldDispose">True to dispose the Gpio Controller</param>
+        /// <param name="stepsToRotate">Amount of steps needed to rotate motor once in HalfStepMode.</param>
+        public Uln2003(int pin1, int pin2, int pin3, int pin4, GpioController? controller = null, bool shouldDispose = true, int stepsToRotate = 4096)
         {
             _pin1 = pin1;
             _pin2 = pin2;
@@ -69,6 +77,8 @@ namespace Iot.Device.Uln2003
             _pin4 = pin4;
 
             _controller = controller ?? new GpioController();
+            _shouldDispose = shouldDispose || controller is null;
+            _stepsToRotate = stepsToRotate;
 
             _controller.OpenPin(_pin1, PinMode.Output);
             _controller.OpenPin(_pin2, PinMode.Output);
@@ -87,10 +97,7 @@ namespace Iot.Device.Uln2003
         /// </summary>
         public StepperMode Mode
         {
-            get
-            {
-                return _mode;
-            }
+            get => _mode;
             set
             {
                 _mode = value;
@@ -99,12 +106,15 @@ namespace Iot.Device.Uln2003
                 {
                     case StepperMode.HalfStep:
                         _currentSwitchingSequence = _halfStepSequence;
+                        _stepsToRotateInMode = _stepsToRotate;
                         break;
                     case StepperMode.FullStepSinglePhase:
                         _currentSwitchingSequence = _fullStepSinglePhaseSequence;
+                        _stepsToRotateInMode = _stepsToRotate / 2;
                         break;
                     case StepperMode.FullStepDualPhase:
                         _currentSwitchingSequence = _fullStepDualPhaseSequence;
+                        _stepsToRotateInMode = _stepsToRotate / 2;
                         break;
                 }
             }
@@ -133,7 +143,7 @@ namespace Iot.Device.Uln2003
             _stopwatch.Restart();
             _isClockwise = steps >= 0;
             _steps = Math.Abs(steps);
-            _stepMicrosecondsDelay = RPM > 0 ? 60 * 1000 * 1000 / _steps / RPM : StepperMotorDefaultDelay;
+            _stepMicrosecondsDelay = RPM > 0 ? 60 * 1000 * 1000 / _stepsToRotateInMode / RPM : StepperMotorDefaultDelay;
             _currentStep = 0;
 
             while (_currentStep < _steps)
@@ -159,6 +169,15 @@ namespace Iot.Device.Uln2003
             }
         }
 
+        /// <summary>
+        /// Rotates the motor. If the number is negative, the motor moves in the reverse direction.
+        /// </summary>
+        /// <param name="rotations">Number of rotations.</param>
+        public void Rotate(int rotations)
+        {
+            Step(rotations * _stepsToRotateInMode);
+        }
+
         private void ApplyEngineStep()
         {
             _controller.Write(_pin1, _currentSwitchingSequence[0, _engineStep - 1]);
@@ -171,8 +190,11 @@ namespace Iot.Device.Uln2003
         public void Dispose()
         {
             Stop();
-            _controller?.Dispose();
-            _controller = null;
+            if (_shouldDispose)
+            {
+                _controller?.Dispose();
+                _controller = null!;
+            }
         }
     }
 }

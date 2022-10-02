@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System.Collections.Generic;
 using System.Drawing;
@@ -160,11 +159,13 @@ namespace Iot.Device.Media
         /// <returns>RGB color.</returns>
         private static Color YuvToRgb(int y, int u, int v)
         {
-            byte r = (byte)(y + 1.4075 * (v - 128));
-            byte g = (byte)(y - 0.3455 * (u - 128) - (0.7169 * (v - 128)));
-            byte b = (byte)(y + 1.7790 * (u - 128));
+            byte r = Clamp(y + 1.4075 * (v - 128));
+            byte g = Clamp(y - 0.3455 * (u - 128) - (0.7169 * (v - 128)));
+            byte b = Clamp(y + 1.7790 * (u - 128));
 
             return Color.FromArgb(r, g, b);
         }
+
+        private static byte Clamp(double val) => (byte)(val > 255 ? 255 : val < 0 ? 0 : val);
     }
 }

@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 
@@ -49,37 +48,24 @@ namespace Iot.Device.Mcp25xxx.Register.MessageReceive
         /// </summary>
         public byte ReceiveBufferDataFieldBytes { get; }
 
-        private Address GetAddress()
+        private Address GetAddress() => RxBufferNumber switch
         {
-            switch (RxBufferNumber)
-            {
-                case 0:
-                    return (Address)((byte)Address.RxB0D0 + Index);
-                case 1:
-                    return (Address)((byte)Address.RxB1D0 + Index);
-                default:
-                    throw new ArgumentException($"Invalid Rx Bufferer Number value {RxBufferNumber}.", nameof(RxBufferNumber));
-            }
-        }
+            0 => (Address)((byte)Address.RxB0D0 + Index),
+            1 => (Address)((byte)Address.RxB1D0 + Index),
+            _ => throw new Exception($"Invalid value for {nameof(RxBufferNumber)}: {RxBufferNumber}."),
+        };
 
         /// <summary>
         /// Gets the Rx Buffer Number based on the register address.
         /// </summary>
         /// <param name="address">The address to look up Rx Buffer Number.</param>
         /// <returns>The Rx Buffer Number based on the register address.</returns>
-        public static byte GetRxBufferNumber(Address address)
+        public static byte GetRxBufferNumber(Address address) => address switch
         {
-            if (address >= Address.RxB0D0 && address <= Address.RxB0D7)
-            {
-                return 0;
-            }
-            else if (address >= Address.RxB1D0 && address <= Address.RxB1D7)
-            {
-                return 1;
-            }
-
-            throw new ArgumentException($"Invalid address value {address}.", nameof(address));
-        }
+            >= Address.RxB0D0 and <= Address.RxB0D7 => 0,
+            >= Address.RxB1D0 and <= Address.RxB1D7 => 1,
+            _ => throw new ArgumentException($"Invalid address value {address}.", nameof(address)),
+        };
 
         /// <summary>
         /// Gets the address of the register.
