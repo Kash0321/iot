@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System.Device.Gpio;
 
@@ -18,12 +17,13 @@ namespace Iot.Device.Mcp23xxx
         /// <param name="reset">Reset pin</param>
         /// <param name="interruptA">Interrupt A pin</param>
         /// <param name="interruptB">Interrupt B pin</param>
-        /// <param name="masterController">
+        /// <param name="controller">
         /// <see cref="GpioController"/> related with
         /// <paramref name="reset"/> <paramref name="interruptA"/> and <paramref name="interruptB"/> pins
         /// </param>
-        protected Mcp23x1x(BusAdapter device, int reset, int interruptA, int interruptB, GpioController masterController)
-            : base(device, reset, interruptA, interruptB, masterController)
+        /// <param name="shouldDispose">True to dispose the Gpio Controller</param>
+        protected Mcp23x1x(BusAdapter device, int reset, int interruptA, int interruptB, GpioController? controller, bool shouldDispose = true)
+            : base(device, reset, interruptA, interruptB, controller, shouldDispose: shouldDispose)
         {
         }
 
@@ -54,5 +54,27 @@ namespace Iot.Device.Mcp23xxx
         /// Reads the interrupt pin for the given port if configured.
         /// </summary>
         public PinValue ReadInterrupt(Port port) => InternalReadInterrupt(port);
+
+        /// <summary>
+        /// Reads all bits of port A in a single operation.
+        /// </summary>
+        /// <returns>In the low byte: A bit field of the value of the first 8 GPIO ports
+        /// (Bit 0: GPIO 0, Bit 1: GPIO 1 etc.). Only the bits of input ports are defined.</returns>
+        public int ReadPortA()
+        {
+            int value = ReadByte(Register.GPIO, Port.PortA);
+            return value;
+        }
+
+        /// <summary>
+        /// Reads all bits of port B in a single operation.
+        /// </summary>
+        /// <returns>In the low byte: A bit field of the value of the second 8 GPIO ports
+        /// (Bit 0: GPIO 8, Bit 1: GPIO 9 etc.). Only the bits of input ports are defined.</returns>
+        public int ReadPortB()
+        {
+            int value = ReadByte(Register.GPIO, Port.PortB);
+            return value;
+        }
     }
 }

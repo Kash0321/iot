@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 
@@ -79,36 +78,24 @@ namespace Iot.Device.Mcp25xxx.Register.AcceptanceFilter
         /// </summary>
         public byte StandardIdentifierMask { get; }
 
-        private Address GetAddress()
+        private Address GetAddress() => RxMaskNumber switch
         {
-            switch (RxMaskNumber)
-            {
-                case 0:
-                    return Address.RxM0Sidl;
-                case 1:
-                    return Address.RxM1Sidl;
-                default:
-                    throw new ArgumentException($"Invalid Rx Mask Number value {RxMaskNumber}.", nameof(RxMaskNumber));
-            }
-        }
+            0 => Address.RxM0Sidl,
+            1 => Address.RxM1Sidl,
+            _ => throw new Exception($"Invalid value for {nameof(RxMaskNumber)}: {RxMaskNumber}."),
+        };
 
         /// <summary>
         /// Gets the Rx Mask Number based on the register address.
         /// </summary>
         /// <param name="address">The address to look up Rx Mask Number.</param>
         /// <returns>The Rx Mask Number based on the register address.</returns>
-        public static byte GetRxMaskNumber(Address address)
+        public static byte GetRxMaskNumber(Address address) => address switch
         {
-            switch (address)
-            {
-                case Address.RxM0Sidl:
-                    return 0;
-                case Address.RxM1Sidl:
-                    return 1;
-                default:
-                    throw new ArgumentException($"Invalid address value {address}.", nameof(address));
-            }
-        }
+            Address.RxM0Sidl => 0,
+            Address.RxM1Sidl => 1,
+            _ => throw new ArgumentException($"Invalid value: {address}.", nameof(address)),
+        };
 
         /// <summary>
         /// Gets the address of the register.

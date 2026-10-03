@@ -1,15 +1,15 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
-using System.Drawing;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Globalization;
+using System.Drawing;
+using Iot.Device.Graphics;
 
 namespace Iot.Device.CharacterLcd
 {
@@ -31,7 +31,7 @@ namespace Iot.Device.CharacterLcd
         private LineWrapMode _lineFeedMode;
         private TimeSpan _scrollUpDelay;
         private string _romType;
-        private Encoding _characterEncoding;
+        private Encoding? _characterEncoding;
 
         /// <summary>
         /// Creates a new instance of the <see cref="LcdConsole"/> class using the specified LCD low-level interface.
@@ -64,21 +64,13 @@ namespace Iot.Device.CharacterLcd
         /// Position of the cursor, from left.
         /// Note: May be outside the bounds of the display.
         /// </summary>
-        public int CursorLeft
-        {
-            get;
-            private set;
-        }
+        public int CursorLeft { get; private set; }
 
         /// <summary>
         /// Position of the cursor, from top
         /// Note: May be outside the bounds of the display.
         /// </summary>
-        public int CursorTop
-        {
-            get;
-            private set;
-        }
+        public int CursorTop { get; private set; }
 
         /// <summary>
         /// If this is larger than zero, an a wait is introduced each time the display wraps to the next line or scrolls up. Can be used to print long texts to the display,
@@ -86,11 +78,7 @@ namespace Iot.Device.CharacterLcd
         /// </summary>
         public TimeSpan ScrollUpDelay
         {
-            get
-            {
-                return _scrollUpDelay;
-            }
-
+            get => _scrollUpDelay;
             set
             {
                 if (value < TimeSpan.Zero)
@@ -150,10 +138,7 @@ namespace Iot.Device.CharacterLcd
         /// </summary>
         public LineWrapMode LineFeedMode
         {
-            get
-            {
-                return _lineFeedMode;
-            }
+            get => _lineFeedMode;
             set
             {
                 _lineFeedMode = value;
@@ -163,10 +148,7 @@ namespace Iot.Device.CharacterLcd
         /// <summary>
         /// Size of the display
         /// </summary>
-        public Size Size
-        {
-            get;
-        }
+        public Size Size { get; }
 
         private void ClearStringBuffer()
         {
@@ -230,18 +212,18 @@ namespace Iot.Device.CharacterLcd
         /// There are only 256 characters available. There are chip variants
         /// with different character sets. Characters from space ' ' (32) to
         /// '}' are usually the same with the exception of '\', which is a
-        /// yen symbol on some chips '¥'.
+        /// yen symbol on some chips '¥'. See constructor for character map definitions.
         /// </remarks>
         public void Write(string text)
         {
-            if (text == null)
+            if (text is null)
             {
                 throw new ArgumentNullException(nameof(text));
             }
 
             text = text.Replace("\r\n", "\n"); // Change to linux format only, so we have to consider only this case further
 
-            List<string> lines = text.Split("\n", StringSplitOptions.None).ToList();
+            List<string> lines = text.Split('\n').ToList();
             FindLineWraps(CursorLeft, lines);
             for (int i = 0; i < lines.Count; i++)
             {
@@ -249,11 +231,25 @@ namespace Iot.Device.CharacterLcd
                 string currentLine = line;
 
                 int remainingChars = Math.Min(currentLine.Length, Size.Width - CursorLeft);
+                int actuallyUsedRemainingChars = (CursorLeft + remainingChars) < Size.Width ? CursorLeft + remainingChars : Size.Width;
+                if (CursorLeft + remainingChars < Size.Width && LineFeedMode != LineWrapMode.Truncate)
+                {
+                    // If we're in line feed mode, make sure we delete anything past the end of the new line (relevant in case of overwriting)
+                    currentLine += new string(' ', Size.Width - remainingChars - CursorLeft);
+                    remainingChars = currentLine.Length;
+                }
+
                 if (remainingChars > 0)
                 {
                     lock (_lock)
                     {
                         WriteCurrentLine(currentLine.Substring(0, remainingChars));
+                    }
+
+                    // Reset back, so that if we write a line with multiple calls to Write, the line is continued.
+                    if (actuallyUsedRemainingChars < Size.Width)
+                    {
+                        CursorLeft = actuallyUsedRemainingChars;
                     }
                 }
 
@@ -431,7 +427,7 @@ namespace Iot.Device.CharacterLcd
             for (int i = 0; i < Size.Height; i++)
             {
                 _lcd.SetCursorPosition(0, i);
-                byte[] buffer = MapChars(_currentData[i].ToString());
+                char[] buffer = MapChars(_currentData[i].ToString());
                 _lcd.Write(buffer);
             }
 
@@ -462,7 +458,7 @@ namespace Iot.Device.CharacterLcd
             // Replace the existing chars at the given position with the new text
             _currentData[CursorTop].Remove(CursorLeft, line.Length);
             _currentData[CursorTop].Insert(CursorLeft, line);
-            byte[] buffer = MapChars(line);
+            char[] buffer = MapChars(line);
             _lcd.Write(buffer);
             CursorLeft += line.Length;
         }
@@ -477,15 +473,8 @@ namespace Iot.Device.CharacterLcd
         /// <param name="maxNumberOfCustomCharacters">The maximum number of custom characters supported by the hardware.</param>
         /// <param name="factory">Character encoding factory that delivers the mapping of the Char type to the hardware ROM character codes. May add special characters into
         /// the character ROM. Default: Null (Use internal factory)</param>
-        public static LcdCharacterEncoding CreateEncoding(CultureInfo culture, string romType, char unknownCharacter = '?', int maxNumberOfCustomCharacters = 8, LcdCharacterEncodingFactory factory = null)
-        {
-            if (factory == null)
-            {
-                factory = new LcdCharacterEncodingFactory();
-            }
-
-            return factory.Create(culture, romType, unknownCharacter, maxNumberOfCustomCharacters);
-        }
+        public static LcdCharacterEncoding CreateEncoding(CultureInfo culture, string romType, char unknownCharacter = '?', int maxNumberOfCustomCharacters = 8, LcdCharacterEncodingFactory? factory = null) =>
+            (factory ?? new LcdCharacterEncodingFactory()).Create(culture, romType, unknownCharacter, maxNumberOfCustomCharacters);
 
         /// <summary>
         /// Loads the specified encoding.
@@ -496,8 +485,7 @@ namespace Iot.Device.CharacterLcd
         /// <returns>See true if the encoding was correctly loaded.</returns>
         public bool LoadEncoding(Encoding encoding)
         {
-            LcdCharacterEncoding lcdCharacterEncoding = encoding as LcdCharacterEncoding;
-            if (lcdCharacterEncoding != null)
+            if (encoding is LcdCharacterEncoding lcdCharacterEncoding)
             {
                 return LoadEncoding(encoding);
             }
@@ -521,14 +509,14 @@ namespace Iot.Device.CharacterLcd
             bool allCharactersLoaded = encoding.AllCharactersSupported;
             lock (_lock)
             {
-                int numberOfCharctersToLoad = Math.Min(encoding.ExtraCharacters.Count, _lcd.NumberOfCustomCharactersSupported);
-                if (numberOfCharctersToLoad < encoding.ExtraCharacters.Count)
+                int numberOfCharactersToLoad = Math.Min(encoding.ExtraCharacters.Count, _lcd.NumberOfCustomCharactersSupported);
+                if (numberOfCharactersToLoad < encoding.ExtraCharacters.Count)
                 {
-                    // We can't completelly load that encoding, because there are not enough custom slots.
+                    // We can't completely load that encoding, because there are not enough custom slots.
                     allCharactersLoaded = false;
                 }
 
-                for (byte i = 0; i < numberOfCharctersToLoad; i++)
+                for (byte i = 0; i < numberOfCharactersToLoad; i++)
                 {
                     byte[] pixelMap = encoding.ExtraCharacters[i];
                     _lcd.CreateCustomCharacter(i, pixelMap);
@@ -551,21 +539,33 @@ namespace Iot.Device.CharacterLcd
             }
         }
 
-        private byte[] MapChars(string line)
+        private char[] MapChars(string line)
         {
-            byte[] buffer = new byte[line.Length];
-            if (_characterEncoding == null)
+            char[] buffer = new char[line.Length];
+            if (_characterEncoding is null)
             {
                 for (int i = 0; i < line.Length; i++)
                 {
-                    buffer[i] = (byte)line[i];
+                    buffer[i] = line[i];
                 }
 
                 return buffer;
             }
             else
             {
-                return _characterEncoding.GetBytes(line);
+                byte[] buff = _characterEncoding.GetBytes(line);
+                if (buff is not object)
+                {
+                    return new char[0];
+                }
+
+                char[] encoded = new char[buff.Length];
+                for (int i = 0; i < buff.Length; i++)
+                {
+                    encoded[i] = (char)buff[i];
+                }
+
+                return encoded;
             }
         }
 
@@ -576,7 +576,7 @@ namespace Iot.Device.CharacterLcd
         {
             if (_shouldDispose)
             {
-                _lcd.Dispose();
+                _lcd?.Dispose();
             }
 
             GC.SuppressFinalize(this);

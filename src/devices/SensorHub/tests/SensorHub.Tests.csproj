@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>$(DefaultTestTfms)</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="SensorHub.Tests.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../SensorHub.csproj" />
+  </ItemGroup>
+
+</Project>

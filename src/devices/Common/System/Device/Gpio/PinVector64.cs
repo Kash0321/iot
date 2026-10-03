@@ -1,13 +1,12 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 namespace System.Device.Gpio
 {
     /// <summary>
     /// 64-bit vector of pins and values.
     /// </summary>
-    internal struct PinVector64
+    partial struct PinVector64
     {
         /// <summary>
         /// Bit vector of pin numbers from 0 (bit 0) to 63 (bit 63).

@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Reflection;
@@ -11,7 +10,7 @@ namespace Iot.Device.Media
     /// <summary>
     /// The pixel format of a video device.
     /// </summary>
-    public enum PixelFormat : uint
+    public enum VideoPixelFormat : uint
     {
         /// <summary>
         /// RGB332

@@ -1,8 +1,7 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
-namespace IoT.Device.Pn532
+namespace Iot.Device.Pn532
 {
     /// <summary>
     /// All errors that can be returned by the PN532

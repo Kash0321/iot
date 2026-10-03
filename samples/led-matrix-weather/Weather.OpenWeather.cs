@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Net.Http;
@@ -33,12 +32,12 @@ namespace LedMatrixWeather
         public float Speed { get; set; }
         public float Deg { get; set; }
     }
-    
+
     internal struct OpenWeatherClouds
     {
         public int All { get; set; }
     }
-    
+
     internal struct OpenWeatherSys
     {
         public int Type { get; set; }
@@ -48,7 +47,7 @@ namespace LedMatrixWeather
         public int Sunrise { get; set; }
         public int Sunset { get; set; }
     }
-    
+
     internal struct OpenWeatherReadings
     {
         public float Temp { get; set; }
@@ -57,7 +56,7 @@ namespace LedMatrixWeather
         public float TempMin { get; set; }
         public float TempMax { get; set; }
     }
-    
+
     internal struct OpenWeatherResponse
     {
         // This is also self-test since this is an actual response from day of first testing.

@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Collections.Concurrent;
@@ -53,7 +52,7 @@ namespace Iot.Device.Mcp23xxx.Tests
             {
                 Device = device;
                 ChipMock = chipMock;
-                Controller = new GpioController(PinNumberingScheme.Logical, Device);
+                Controller = new GpioController(Device);
             }
         }
 
@@ -87,7 +86,7 @@ namespace Iot.Device.Mcp23xxx.Tests
             private readonly I2cConnectionSettings _settings;
             public Mcp23xxxChipMock DeviceMock { get; private set; }
 
-            public I2cDeviceMock(int ports, I2cConnectionSettings settings = null)
+            public I2cDeviceMock(int ports, I2cConnectionSettings? settings = null)
             {
                 DeviceMock = new Mcp23xxxChipMock(ports, isSpi: false);
                 _settings = settings ?? new I2cConnectionSettings(0, 0x20);
@@ -116,8 +115,8 @@ namespace Iot.Device.Mcp23xxx.Tests
             private readonly bool _isSpi;
             // OLATB address is 0x15
             private readonly byte[] _registers;
-            private byte[] _lastReadBuffer;
-            private byte[] _lastWriteBuffer;
+            private byte[]? _lastReadBuffer;
+            private byte[]? _lastWriteBuffer;
 
             public Mcp23xxxChipMock(int ports, bool isSpi)
             {
@@ -129,8 +128,8 @@ namespace Iot.Device.Mcp23xxx.Tests
             public Span<byte> Registers => _registers;
 
             // Can't coalesce here https://github.com/dotnet/roslyn/issues/29927
-            public ReadOnlySpan<byte> LastReadBuffer => _lastReadBuffer == null ? ReadOnlySpan<byte>.Empty : _lastReadBuffer;
-            public ReadOnlySpan<byte> LastWriteBuffer => _lastWriteBuffer == null ? ReadOnlySpan<byte>.Empty : _lastWriteBuffer;
+            public ReadOnlySpan<byte> LastReadBuffer => _lastReadBuffer is null ? ReadOnlySpan<byte>.Empty : _lastReadBuffer;
+            public ReadOnlySpan<byte> LastWriteBuffer => _lastWriteBuffer is null ? ReadOnlySpan<byte>.Empty : _lastWriteBuffer;
 
             public void Read(Span<byte> buffer)
             {
@@ -138,6 +137,11 @@ namespace Iot.Device.Mcp23xxx.Tests
                 if (_isSpi)
                 {
                     buffer = buffer.Slice(2);
+                }
+
+                if (_lastWriteBuffer is null)
+                {
+                    throw new Exception($"{nameof(Mcp23xxxChipMock)} is not correctly configured");
                 }
 
                 byte registerAddress = _lastWriteBuffer[0];
@@ -181,6 +185,7 @@ namespace Iot.Device.Mcp23xxx.Tests
         {
             private Dictionary<int, PinValue> _pinValues = new Dictionary<int, PinValue>();
             private ConcurrentDictionary<int, PinMode> _pinModes = new ConcurrentDictionary<int, PinMode>();
+            private PinChangeEventHandler? _callback;
 
             protected override int PinCount => 10;
 
@@ -210,7 +215,9 @@ namespace Iot.Device.Mcp23xxx.Tests
                 return PinValue.Low;
             }
 
-            public void Read(Span<PinValuePair> pinValuePairs)
+            protected override void Toggle(int pinNumber) => Write(pinNumber, !Read(pinNumber));
+
+            protected override void Read(Span<PinValuePair> pinValuePairs)
             {
                 for (int i = 0; i < pinValuePairs.Length; i++)
                 {
@@ -237,13 +244,22 @@ namespace Iot.Device.Mcp23xxx.Tests
 
             protected override bool IsPinModeSupported(int pinNumber, PinMode mode) => true;
 
-            protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => throw new NotImplementedException();
-
             protected override WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, CancellationToken cancellationToken) => throw new NotImplementedException();
 
-            protected override void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback) => throw new NotImplementedException();
+            protected override void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
+            {
+                _callback = callback; // Keep it simple for this test class
+            }
 
-            protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback) => throw new NotImplementedException();
+            protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
+            {
+                _callback = null;
+            }
+
+            public void FireEvent(PinValueChangedEventArgs e)
+            {
+                _callback?.Invoke(this, e);
+            }
         }
     }
 }

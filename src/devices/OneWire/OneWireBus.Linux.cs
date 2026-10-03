@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Collections.Generic;
@@ -13,20 +12,23 @@ namespace Iot.Device.OneWire
 {
     public partial class OneWireBus
     {
-        internal const string SysfsBusDevicesPath = "/sys/bus/w1/devices";
-        internal const string SysfsDevicesPath = "/sys/devices";
+        internal const string DefaultSysfsBusDevicesPath = "/sys/bus/w1/devices";
+        internal const string DefaultSysfsDevicesPath = "/sys/devices";
 
-        internal static IEnumerable<string> EnumerateBusIdsInternal()
+        private readonly string _sysfsBusDevicesPath = DefaultSysfsBusDevicesPath;
+        private readonly string _sysfsDevicesPath = DefaultSysfsDevicesPath;
+
+        internal static IEnumerable<string> EnumerateBusIdsInternal(string sysfsBusDevicesPath)
         {
-            foreach (var entry in Directory.EnumerateDirectories(SysfsBusDevicesPath, "w1_bus_master*"))
+            foreach (var entry in Directory.EnumerateDirectories(sysfsBusDevicesPath, "w1_bus_master*"))
             {
                 yield return Path.GetFileName(entry);
             }
         }
 
-        internal static IEnumerable<string> EnumerateDeviceIdsInternal(string busId, DeviceFamily family)
+        internal static IEnumerable<string> EnumerateDeviceIdsInternal(string sysfsBusDevicesPath, string busId, DeviceFamily family)
         {
-            var devIds = File.ReadLines(Path.Combine(SysfsDevicesPath, busId, "w1_master_slaves"));
+            var devIds = File.ReadLines(Path.Combine(sysfsBusDevicesPath, busId, "w1_master_slaves"));
             return family switch
             {
                 DeviceFamily.Any => devIds,
@@ -37,28 +39,42 @@ namespace Iot.Device.OneWire
 
         internal static DeviceFamily GetDeviceFamilyInternal(string busId, string devId)
         {
-            int.TryParse(devId.AsSpan(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var devFamily);
+            int.TryParse(devId.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var devFamily);
             return (DeviceFamily)devFamily;
         }
 
-        internal static async Task ScanForDeviceChangesInternalAsync(OneWireBus bus, int numDevices, int numScans)
+        private async Task ScanForDeviceChangesInternalAsync(int numDevices, int numScans)
         {
+#if NETSTANDARD2_0
+            var sysfsDevicesPath = _sysfsDevicesPath;
+            var busId = BusId;
+            await Task.Factory.StartNew(() =>
+            {
+                if (numDevices > 0)
+                {
+                    File.WriteAllText(Path.Combine(sysfsDevicesPath, busId, "w1_master_max_slave_count"), numDevices.ToString());
+                }
+
+                File.WriteAllText(Path.Combine(sysfsDevicesPath, busId, "w1_master_search"), numScans.ToString());
+            });
+#else
             if (numDevices > 0)
             {
-                await File.WriteAllTextAsync(Path.Combine(SysfsDevicesPath, bus.BusId, "w1_master_max_slave_count"), numDevices.ToString());
+                await File.WriteAllTextAsync(Path.Combine(_sysfsDevicesPath, BusId, "w1_master_max_slave_count"), numDevices.ToString());
             }
 
-            await File.WriteAllTextAsync(Path.Combine(SysfsDevicesPath, bus.BusId, "w1_master_search"), numScans.ToString());
+            await File.WriteAllTextAsync(Path.Combine(_sysfsDevicesPath, BusId, "w1_master_search"), numScans.ToString());
+#endif
         }
 
-        internal static void ScanForDeviceChangesInternal(OneWireBus bus, int numDevices, int numScans)
+        private void ScanForDeviceChangesInternal(int numDevices, int numScans)
         {
             if (numDevices > 0)
             {
-                File.WriteAllText(Path.Combine(SysfsDevicesPath, bus.BusId, "w1_master_max_slave_count"), numDevices.ToString());
+                File.WriteAllText(Path.Combine(_sysfsDevicesPath, BusId, "w1_master_max_slave_count"), numDevices.ToString());
             }
 
-            File.WriteAllText(Path.Combine(SysfsDevicesPath, bus.BusId, "w1_master_search"), numScans.ToString());
+            File.WriteAllText(Path.Combine(_sysfsDevicesPath, BusId, "w1_master_search"), numScans.ToString());
         }
     }
 }

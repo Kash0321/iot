@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>$(DefaultSampleTfms)</TargetFramework>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="GpioSpeedBenchmark.cs" />
+    <Compile Remove="orangepi5\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\BoardLed\BoardLed.csproj" />
+    <ProjectReference Include="..\Iot.Device.Gpio.csproj" />
+  </ItemGroup>
+
+</Project>

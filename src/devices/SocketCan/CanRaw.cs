@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Diagnostics;
@@ -8,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -19,6 +19,7 @@ namespace Iot.Device.SocketCan
     public class CanRaw : IDisposable
     {
         private SafeCanRawSocketHandle _handle;
+        private bool _waitForFrameOnRead = true;
 
         /// <summary>
         /// Constructs CanRaw instance
@@ -27,6 +28,25 @@ namespace Iot.Device.SocketCan
         public CanRaw(string networkInterface = "can0")
         {
             _handle = new SafeCanRawSocketHandle(networkInterface);
+        }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether a read operation waits for a frame to become available.
+        /// </summary>
+        /// <remarks>
+        /// When set to <see langword="true"/> (the default) <see cref="TryReadFrame(Span{byte}, out int, out CanId)"/>
+        /// waits (blocks) until a frame is received. When set to <see langword="false"/> the socket is switched to
+        /// non-blocking mode and <see cref="TryReadFrame(Span{byte}, out int, out CanId)"/> returns
+        /// <see langword="false"/> immediately when no frame is available to read.
+        /// </remarks>
+        public bool WaitForFrameOnRead
+        {
+            get => _waitForFrameOnRead;
+            set
+            {
+                Interop.SetWaitForFrameOnRead(_handle, value);
+                _waitForFrameOnRead = value;
+            }
         }
 
         /// <summary>
@@ -39,12 +59,12 @@ namespace Iot.Device.SocketCan
         {
             if (!id.IsValid)
             {
-                throw new ArgumentException(nameof(id), "Id is not valid. Ensure Error flag is not set and that id is in the valid range (11-bit for standard frame and 29-bit for extended frame).");
+                throw new ArgumentException("Id is not valid. Ensure Error flag is not set and that id is in the valid range (11-bit for standard frame and 29-bit for extended frame).", nameof(id));
             }
 
             if (data.Length > CanFrame.MaxLength)
             {
-                throw new ArgumentException(nameof(data), $"Data length cannot exceed {CanFrame.MaxLength} bytes.");
+                throw new ArgumentException($"Data length cannot exceed {CanFrame.MaxLength} bytes.", nameof(data));
             }
 
             CanFrame frame = new CanFrame();
@@ -56,11 +76,10 @@ namespace Iot.Device.SocketCan
             {
                 Span<byte> frameData = new Span<byte>(frame.Data, data.Length);
                 data.CopyTo(frameData);
-            }
 
-            ReadOnlySpan<CanFrame> frameSpan = MemoryMarshal.CreateReadOnlySpan(ref frame, 1);
-            ReadOnlySpan<byte> buff = MemoryMarshal.AsBytes(frameSpan);
-            Interop.Write(_handle, buff);
+                byte* buff = (byte*)&frame;
+                Interop.Write(_handle, buff, Marshal.SizeOf<CanFrame>());
+            }
         }
 
         /// <summary>
@@ -74,17 +93,27 @@ namespace Iot.Device.SocketCan
         {
             if (data.Length < CanFrame.MaxLength)
             {
-                throw new ArgumentException($"Buffer length must be at minimum {CanFrame.MaxLength} bytes", nameof(data));
+                throw new ArgumentException($"Value must be a minimum of {CanFrame.MaxLength} bytes.", nameof(data));
             }
 
             CanFrame frame = new CanFrame();
 
-            Span<CanFrame> frameSpan = MemoryMarshal.CreateSpan(ref frame, 1);
-            Span<byte> buff = MemoryMarshal.AsBytes(frameSpan);
-            while (buff.Length > 0)
+            int remainingBytes = Marshal.SizeOf<CanFrame>();
+            unsafe
             {
-                int read = Interop.Read(_handle, buff);
-                buff = buff.Slice(read);
+                while (remainingBytes > 0)
+                {
+                    int read = Interop.Read(_handle, (byte*)&frame, remainingBytes);
+                    if (read < 0)
+                    {
+                        // No data is available right now (non-blocking mode).
+                        id = default;
+                        frameLength = 0;
+                        return false;
+                    }
+
+                    remainingBytes -= read;
+                }
             }
 
             id = frame.Id;
@@ -117,6 +146,27 @@ namespace Iot.Device.SocketCan
         }
 
         /// <summary>
+        /// Reads frame from the bus with the timestamp when it was received.
+        /// </summary>
+        /// <param name="data">Data where output data should be written to</param>
+        /// <param name="frameLength">Length of the data read</param>
+        /// <param name="id">Recipient identifier</param>
+        /// <param name="timestamp">UTC time when this frame was received with microsecond resolution</param>
+        /// <returns></returns>
+        public bool TryReadFrame(Span<byte> data, out int frameLength, out CanId id, out DateTimeOffset timestamp)
+        {
+            bool ret = TryReadFrame(data, out frameLength, out id);
+            if (!ret)
+            {
+                timestamp = default;
+                return false;
+            }
+
+            timestamp = Interop.GetLastTimeStamp(_handle);
+            return ret;
+        }
+
+        /// <summary>
         /// Set filter on the bus to read only from specified recipient.
         /// </summary>
         /// <param name="id">Recipient identifier</param>
@@ -124,7 +174,7 @@ namespace Iot.Device.SocketCan
         {
             if (!id.IsValid)
             {
-                throw new ArgumentException($"{nameof(id)} must be a valid CanId");
+                throw new ArgumentException("Value must be a valid CanId", nameof(id));
             }
 
             Span<Interop.CanFilter> filters = stackalloc Interop.CanFilter[1];

@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 namespace Iot.Device.Pn532.AsTarget
 {
@@ -12,7 +11,7 @@ namespace Iot.Device.Pn532.AsTarget
         /// <summary>
         /// The target baud rate between the PN532 and the reader
         /// </summary>
-        public TargetBaudRateInialized TargetBaudRate { get; set; }
+        public TargetBaudRateInitialized TargetBaudRate { get; set; }
 
         /// <summary>
         /// True if we have a PICC emulation

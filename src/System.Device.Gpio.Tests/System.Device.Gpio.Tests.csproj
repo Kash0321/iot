@@ -1,25 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
-    <RuntimeIdentifiers>win-arm;linux-arm</RuntimeIdentifiers>
+    <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
-    <Configurations>Windows-Debug;Linux-Debug;Linux-Release;Windows-Release;Debug;Release</Configurations>
+    <!-- Keep quiet about duplicate package references from props files -->
+    <NoWarn>$(NoWarn);NETSDK1023</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="$(MainLibraryPath)System.Device.Gpio.csproj">
-      <AdditionalProperties Condition="'$(RuntimeIdentifier)' != ''">RuntimeIdentifier=$(RuntimeIdentifier.SubString(0, $(RuntimeIdentifier.IndexOf('-'))))</AdditionalProperties>
-    </ProjectReference>
+    <ProjectReference Include="$(MainLibraryPath)System.Device.Gpio.csproj" />
     <ProjectReference Include="..\Iot.Device.Bindings\Iot.Device.Bindings.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetsLinux)' == 'true'">
-    <!--Excluding Windows implementations-->
-    <Compile Remove="**\*.Windows.cs" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetsWindows)' == 'true'">
-    <!--Excluding Linux implementations-->
-    <Compile Remove="**\*.Linux.cs" />
-  </ItemGroup>
 </Project>

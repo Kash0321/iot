@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 
@@ -114,36 +113,24 @@ namespace Iot.Device.Mcp25xxx.Register.MessageReceive
         /// </summary>
         public byte StandardIdentifier { get; }
 
-        private Address GetAddress()
+        private Address GetAddress() => RxBufferNumber switch
         {
-            switch (RxBufferNumber)
-            {
-                case 0:
-                    return Address.RxB0Sidl;
-                case 1:
-                    return Address.RxB1Sidl;
-                default:
-                    throw new ArgumentException($"Invalid Rx Buffer Number value {RxBufferNumber}.", nameof(RxBufferNumber));
-            }
-        }
+            0 => Address.RxB0Sidl,
+            1 => Address.RxB1Sidl,
+            _ => throw new Exception($"Invalid value for {nameof(RxBufferNumber)}: {RxBufferNumber}."),
+        };
 
         /// <summary>
         /// Gets the Rx Buffer Number based on the register address.
         /// </summary>
         /// <param name="address">The address to look up Rx Buffer Number.</param>
         /// <returns>The Rx Buffer Number based on the register address.</returns>
-        public static byte GetRxBufferNumber(Address address)
+        public static byte GetRxBufferNumber(Address address) => address switch
         {
-            switch (address)
-            {
-                case Address.RxB0Sidl:
-                    return 0;
-                case Address.RxB1Sidl:
-                    return 1;
-                default:
-                    throw new ArgumentException($"Invalid address value {address}.", nameof(address));
-            }
-        }
+            Address.RxB0Sidl => 0,
+            Address.RxB1Sidl => 1,
+            _ => throw new ArgumentException($"Invalid value: {address}.", nameof(address)),
+        };
 
         /// <summary>
         /// Gets the address of the register.

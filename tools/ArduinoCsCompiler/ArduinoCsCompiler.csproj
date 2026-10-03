@@ -1,0 +1,43 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Configurations>Debug;Release</Configurations>
+    <Copyright>The .NET Foundation</Copyright>
+    <Company>The .NET Foundation</Company>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Ignore missing documentation tags (mostly already documented parameter members, anyway)-->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  
+   <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="Runtime\*.cs" />
+    <Compile Include="Runtime\UnitsNet\*.cs" />
+     <Compile Include="Hal\*.cs" />
+   </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Scripting" Version="4.8.0" />
+  </ItemGroup>
+  <ItemGroup Condition="$(Configuration)=='Debug'">
+    <ProjectReference Include="..\..\src\devices\Arduino\Arduino.csproj" />
+    <ProjectReference Include="..\..\src\System.Device.Gpio\System.Device.Gpio.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="$(Configuration)!='Debug'">
+    <ProjectReference Include="..\..\src\System.Device.Gpio\System.Device.Gpio.csproj"/>
+    <ProjectReference Include="..\..\src\Iot.Device.Bindings\Iot.Device.Bindings.csproj"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>$(AssemblyName).Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

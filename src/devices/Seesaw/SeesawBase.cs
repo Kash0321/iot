@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Buffers.Binary;
@@ -14,7 +13,8 @@ namespace Iot.Device.Seesaw
     /// </summary>
     public partial class Seesaw : IDisposable
     {
-        private const byte SessawHardwareId = 0x55;
+        private const byte SeesawHardwareId = 0x55;
+        private const byte NeoDriverHardwareId = 0x87;
 
         /// <summary>
         /// I2C device used for communication
@@ -31,6 +31,7 @@ namespace Iot.Device.Seesaw
         /// will be disposed when the along with the SeeSaw device</param>
         public Seesaw(I2cDevice i2cDevice)
         {
+            I2cDevice = i2cDevice ?? throw new ArgumentNullException(nameof(i2cDevice));
             Initialize(i2cDevice);
         }
 
@@ -55,10 +56,8 @@ namespace Iot.Device.Seesaw
         /// <summary>
         /// Performs a soft reset of the SeeSaw module.
         /// </summary>
-        public void SoftwareReset()
-        {
+        public void SoftwareReset() =>
             WriteByte(SeesawModule.Status, SeesawFunction.StatusSwrst, 0xFF);
-        }
 
         /// <summary>
         /// Initializes the Seesaw device.
@@ -66,19 +65,22 @@ namespace Iot.Device.Seesaw
         /// </summary>
         protected void Initialize(I2cDevice i2cDevice)
         {
-            I2cDevice = i2cDevice;
-
             SoftwareReset();
-
             DelayHelper.DelayMilliseconds(10, true);
 
-            if (ReadByte(SeesawModule.Status, SeesawFunction.StatusHwId) != SessawHardwareId)
+            switch (ReadByte(SeesawModule.Status, SeesawFunction.StatusHwId))
             {
-                throw new NotSupportedException($"The hardware on I2C Bus {I2cDevice.ConnectionSettings.BusId}, Address 0x{I2cDevice.ConnectionSettings.DeviceAddress:X2} does not appear to be an Adafruit SeeSaw module");
+                case SeesawHardwareId:
+                    _options = GetOptions();
+                    Version = GetVersion();
+                    break;
+                case NeoDriverHardwareId:
+                    _options = 1 << (byte)SeesawModule.Neopixel;
+                    Version = GetVersion();
+                    break;
+                default:
+                    throw new NotSupportedException($"The hardware on I2C Bus {I2cDevice.ConnectionSettings.BusId}, Address 0x{I2cDevice.ConnectionSettings.DeviceAddress:X2} does not appear to be an Adafruit SeeSaw module");
             }
-
-            _options = GetOptions();
-            Version = GetVersion();
         }
 
         /// <summary>
@@ -165,7 +167,7 @@ namespace Iot.Device.Seesaw
         public void Dispose()
         {
             I2cDevice?.Dispose();
-            I2cDevice = null;
+            I2cDevice = null!;
         }
     }
 }

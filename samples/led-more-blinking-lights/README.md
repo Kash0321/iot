@@ -1,13 +1,13 @@
 # More blinking lights, with hardware controls
 
-This [sample](Program.cs) demonstrates blinking multiple LED on different schedules and controlling the LEDs from hardware controls. The sample builds on the [Blink an LED](../led-blink/README.md) and [Mcp3008](../../src/devices/Mcp3008/samples/README.md) samples.
+This [sample](Program.cs) demonstrates blinking multiple LED on different schedules and controlling the LEDs from hardware controls. The sample builds on the [Blink an LED](../led-blink/README.md) and [Mcp3008](../../src/devices/Mcp3xxx/README.md) samples.
 
 ## Code
 
 This sample demonstrates how to use five different elements together, three LEDs, a potentiometer and a button. There is no one specific code element to call out here. Each element is controlled in a different way. You will find that different algorithms were needed to control LED timing than in the [Blink an LED](../led-blink/README.md) example. In particular, this sample implements the following:
 
 * Different lighting schedules for different LEDs using the [TimeEnvelope](TimeEnvelope.cs) type.
-* Integrating a factor in the lighting schedule based on the value returned from the potentiometer, implemented in the [Volume  ](Volume.cs) type.
+* Integrating a factor in the lighting schedule based on the value returned from the potentiometer, implemented in the [Volume](Volume.cs) type.
 
 ## Breadboard layout
 

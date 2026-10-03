@@ -1,13 +1,29 @@
 <Project>
-  <Import Project="../../eng/Compilers.props" />
-  <Import Project="../../eng/Versions.props" />
-  <Import Project="../../eng/Analyzers.props" />
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+  
   <PropertyGroup>
+    <!-- Most projects should use this value to build for all possible target frameworks -->
+    <DefaultBindingTfms>net8.0</DefaultBindingTfms>
+    <DefaultSampleTfms>net8.0</DefaultSampleTfms>
+    <DefaultTestTfms>net8.0</DefaultTestTfms>
     <NoWarn>$(NoWarn);CS8321</NoWarn>
     <DeterministicSourcePaths>false</DeterministicSourcePaths>
     <IsPackable>false</IsPackable>
     <MainLibraryPath>$(MSBuildThisFileDirectory)../System.Device.Gpio/</MainLibraryPath>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <SystemDeviceModelProjectName>System.Device.Model</SystemDeviceModelProjectName>
+    <SystemDeviceModelPath>$(MSBuildThisFileDirectory)$(SystemDeviceModelProjectName)/$(SystemDeviceModelProjectName).csproj</SystemDeviceModelPath>
+    <CommonProjectName>Common</CommonProjectName>
+    <CommonProjectPath>$(MSBuildThisFileDirectory)$(CommonProjectName)/$(CommonProjectName).csproj</CommonProjectPath>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(MSBuildProjectName)' != '$(CommonProjectName)' AND '$(MSBuildProjectName)' != '$(SystemDeviceModelProjectName)'">
+  <!-- These projects are included into every binding. They must not depend on each other, or we get a circular dependency -->
+    <ProjectReference Include="$(SystemDeviceModelPath)" />
+    <ProjectReference Include="$(CommonProjectPath)"  />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(MainLibraryPath)System.Device.Gpio.csproj" />
+  </ItemGroup>
+
 </Project>

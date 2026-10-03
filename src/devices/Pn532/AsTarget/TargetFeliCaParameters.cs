@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 
@@ -15,7 +14,7 @@ namespace Iot.Device.Pn532.AsTarget
     {
         // First 2 bytes must be 0x01 0xFE
         private byte[] _nfcId2 = new byte[8] { 0x01, 0xFE, 0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6 };
-        private byte[] _pad = new byte[8];
+        private byte[] _pad = new byte[8] { 0x03, 0x00, 0x4B, 0x02, 0x4F, 0x49, 0x8A, 0x00 };
         // those are typical values
         private byte[] _systemCode = new byte[2] { 0xFF, 0xFF };
 
@@ -32,7 +31,7 @@ namespace Iot.Device.Pn532.AsTarget
             {
                 if (value.Length != _nfcId2.Length)
                 {
-                    throw new ArgumentException($"{nameof(NfcId2)} can only be {_nfcId2.Length} byte long");
+                    throw new ArgumentException($"Value must be {_nfcId2.Length} bytes.", nameof(NfcId2));
                 }
 
                 value.CopyTo(_nfcId2, 0);
@@ -52,7 +51,7 @@ namespace Iot.Device.Pn532.AsTarget
             {
                 if (value.Length != _pad.Length)
                 {
-                    throw new ArgumentException($"{nameof(Pad)} can only be {_pad.Length} byte long");
+                    throw new ArgumentException($"Value must be {_pad.Length} bytes.", nameof(Pad));
                 }
 
                 value.CopyTo(_pad, 0);
@@ -73,7 +72,7 @@ namespace Iot.Device.Pn532.AsTarget
             {
                 if (value.Length != _systemCode.Length)
                 {
-                    throw new ArgumentException($"{nameof(SystemCode)} can only be {_systemCode.Length} byte long");
+                    throw new ArgumentException($"Value must be {_systemCode.Length} bytes.", nameof(SystemCode));
                 }
 
                 value.CopyTo(_systemCode, 0);

@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Diagnostics;
@@ -12,8 +11,17 @@ using CommandLine;
 
 namespace DeviceApiTester.Infrastructure
 {
-    abstract class CommandLineProgram
+    internal abstract class CommandLineProgram
     {
+        protected static Type[] GetAllCommandsInAssembly()
+        {
+            return Assembly.GetExecutingAssembly().GetTypes()
+                .Where(t => typeof(ICommandVerb).IsAssignableFrom(t) || typeof(ICommandVerbAsync).IsAssignableFrom(t))
+                .Where(t => t.GetCustomAttributes<VerbAttribute>().Any())
+                .OrderBy(t => t.GetCustomAttribute<VerbAttribute>()?.Name)
+                .ToArray();
+        }
+
         /// <summary>
         /// Parses the command line <paramref name="args"/> and executes the specified command.
         /// </summary>
@@ -42,15 +50,6 @@ namespace DeviceApiTester.Infrastructure
         /// <summary>The types of commands supported by the program.</summary>
         /// <returns>An array of types for the commands supported by the program.</returns>
         protected virtual Type[] GetCommandTypes() => GetAllCommandsInAssembly();
-
-        protected static Type[] GetAllCommandsInAssembly()
-        {
-            return Assembly.GetExecutingAssembly().GetTypes()
-                .Where(t => typeof(ICommandVerb).IsAssignableFrom(t) || typeof(ICommandVerbAsync).IsAssignableFrom(t))
-                .Where(t => t.GetCustomAttributes<VerbAttribute>().Any())
-                .OrderBy(t => t.GetCustomAttribute<VerbAttribute>().Name)
-                .ToArray();
-        }
 
         protected virtual async Task<int> ExecuteCommandAsync(ICommandVerbAsync verbCommand)
         {
@@ -87,7 +86,9 @@ namespace DeviceApiTester.Infrastructure
             {
                 Console.WriteLine("Waiting for a Debugger to be attached . . . ");
                 while (!Debugger.IsAttached)
+                {
                     Thread.Sleep(400);
+                }
             }
         }
 

@@ -1,6 +1,5 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 // Disable these StyleCop rules for this file, as we are using native names here.
 #pragma warning disable SA1300 // Element should begin with upper-case letter
@@ -35,7 +34,10 @@ namespace Iot.Device.SocketCan
         private static extern int CreateNativeSocket(int domain, int type, CanProtocol protocol);
 
         [DllImport("libc", EntryPoint = "ioctl", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int Ioctl3(int fd, uint request, ref ifreq ifr);
+        private static extern int Ioctl3(int fd, uint request, ref InterfaceIndexQuery ifr);
+
+        [DllImport("libc", EntryPoint = "ioctl", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int Ioctl4(int fd, uint request, out TimeVal tv);
 
         [DllImport("libc", EntryPoint = "bind", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BindSocket(int fd, ref CanSocketAddress addr, uint addrlen);
@@ -46,48 +48,75 @@ namespace Iot.Device.SocketCan
         [DllImport("libc", EntryPoint = "write", CallingConvention = CallingConvention.Cdecl)]
         private static unsafe extern int SocketWrite(int fd, byte* buffer, int size);
 
-        [DllImport("libc", EntryPoint = "read", CallingConvention = CallingConvention.Cdecl)]
+        [DllImport("libc", EntryPoint = "read", CallingConvention = CallingConvention.Cdecl, SetLastError = true)]
         private static unsafe extern int SocketRead(int fd, byte* buffer, int size);
 
         [DllImport("libc", EntryPoint = "setsockopt", CallingConvention = CallingConvention.Cdecl)]
         private static unsafe extern int SetSocketOpt(int fd, int level, int optName, byte* optVal, int optlen);
 
-        public static unsafe void Write(SafeHandle handle, ReadOnlySpan<byte> buffer)
-        {
-            fixed (byte* b = buffer)
-            {
-                int totalBytesWritten = 0;
-                while (totalBytesWritten < buffer.Length)
-                {
-                    int bytesWritten = Interop.SocketWrite((int)handle.DangerousGetHandle(), b, buffer.Length);
-                    if (bytesWritten < 0)
-                    {
-                        throw new IOException("`write` operation failed");
-                    }
+        [DllImport("libc", EntryPoint = "fcntl", CallingConvention = CallingConvention.Cdecl, SetLastError = true)]
+        private static extern int Fcntl(int fd, int cmd, int arg);
 
-                    totalBytesWritten += bytesWritten;
+        // values from <fcntl.h> on Linux
+        private const int F_GETFL = 3;
+        private const int F_SETFL = 4;
+        private const int O_NONBLOCK = 0x800;
+
+        // values from <errno.h> on Linux (EAGAIN and EWOULDBLOCK share the same value)
+        private const int EAGAIN = 11;
+        private const int EWOULDBLOCK = 11;
+
+        public static unsafe void Write(SafeHandle handle, byte* buffer, int length)
+        {
+            int totalBytesWritten = 0;
+            while (totalBytesWritten < length)
+            {
+                int bytesWritten = Interop.SocketWrite((int)handle.DangerousGetHandle(), buffer, length);
+                if (bytesWritten < 0)
+                {
+                    throw new IOException("`write` operation failed");
                 }
+
+                totalBytesWritten += bytesWritten;
             }
         }
 
-        public static unsafe int Read(SafeHandle handle, Span<byte> buffer)
+        public static unsafe int Read(SafeHandle handle, byte* buffer, int length)
         {
-            fixed (byte* b = buffer)
+            int bytesRead = Interop.SocketRead((int)handle.DangerousGetHandle(), buffer, length);
+            if (bytesRead < 0)
             {
-                int bytesRead = Interop.SocketRead((int)handle.DangerousGetHandle(), b, buffer.Length);
-                if (bytesRead < 0)
+                int errno = Marshal.GetLastWin32Error();
+                if (errno == EAGAIN || errno == EWOULDBLOCK)
                 {
-                    throw new IOException("`read` operation failed");
+                    // No data is currently available on a non-blocking socket.
+                    return -1;
                 }
 
-                return bytesRead;
+                throw new IOException("`read` operation failed");
+            }
+
+            return bytesRead;
+        }
+
+        public static void SetWaitForFrameOnRead(SafeHandle handle, bool waitForFrameOnRead)
+        {
+            int fd = (int)handle.DangerousGetHandle();
+            int flags = Fcntl(fd, F_GETFL, 0);
+            if (flags == -1)
+            {
+                throw new IOException("Could not read CAN socket flags");
+            }
+
+            int newFlags = waitForFrameOnRead ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK);
+            if (Fcntl(fd, F_SETFL, newFlags) == -1)
+            {
+                throw new IOException("Could not set CAN socket blocking/non-blocking mode");
             }
         }
 
-        public static void CloseSocket(IntPtr fd)
-        {
+        public static void CloseSocket(IntPtr fd) =>
             CloseSocket((int)fd);
-        }
 
         public static IntPtr CreateCanRawSocket(string networkInterface)
         {
@@ -105,10 +134,8 @@ namespace Iot.Device.SocketCan
         }
 
         public static bool SetCanRawSocketOption<T>(SafeHandle handle, CanSocketOption optName, ReadOnlySpan<T> data)
-            where T : struct
-        {
-            return SetSocketOption(handle, SOL_CAN_RAW, optName, data);
-        }
+            where T : struct =>
+            SetSocketOption(handle, SOL_CAN_RAW, optName, data);
 
         private static unsafe bool SetSocketOption<T>(SafeHandle handle, int level, CanSocketOption optName, ReadOnlySpan<T> data)
             where T : struct
@@ -137,17 +164,17 @@ namespace Iot.Device.SocketCan
         private static unsafe int GetInterfaceIndex(int fd, string name)
         {
             const uint SIOCGIFINDEX = 0x8933;
-            const int MaxLen = ifreq.IFNAMSIZ - 1;
+            const int maxLen = InterfaceIndexQuery.IFNAMSIZ - 1;
 
-            if (name.Length >= MaxLen)
+            if (name.Length >= maxLen)
             {
-                throw new ArgumentException($"`{name}` exceeds maximum allowed length of {MaxLen} size", nameof(name));
+                throw new ArgumentException($"Value exceeds maximum allowed length of {maxLen} size.", nameof(name));
             }
 
-            ifreq ifr = new ifreq();
-            fixed (char* inIntefaceName = name)
+            InterfaceIndexQuery ifr = new InterfaceIndexQuery();
+            fixed (char* inInterfaceName = name)
             {
-                int written = Encoding.ASCII.GetBytes(inIntefaceName, name.Length, ifr.ifr_name, MaxLen);
+                int written = Encoding.ASCII.GetBytes(inInterfaceName, name.Length, ifr.ifr_name, maxLen);
                 ifr.ifr_name[written] = 0;
             }
 
@@ -160,7 +187,30 @@ namespace Iot.Device.SocketCan
             return ifr.ifr_ifindex;
         }
 
-        internal unsafe struct ifreq
+        public static unsafe DateTimeOffset GetLastTimeStamp(SafeHandle handle)
+        {
+            // From Linux 6.12.33+deb13-amd64 x86_64
+            const uint SIOCGSTAMP = 0x8906;
+
+            TimeVal tv;
+            int ret = Ioctl4((int)handle.DangerousGetHandle(), SIOCGSTAMP, out tv);
+            if (ret == -1)
+            {
+                throw new IOException("Could not get socketcan timestamp");
+            }
+
+            // tv_usec is in [us]. DateTimeOffset in ticks of [100 ns], that's why * 10 is needed
+            return DateTimeOffset.FromUnixTimeSeconds(tv.tv_sec).AddTicks(tv.tv_usec * 10);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal unsafe struct TimeVal
+        {
+            public long tv_sec;   /* Seconds */
+            public long tv_usec;  /* Microseconds */
+        }
+
+        internal unsafe struct InterfaceIndexQuery
         {
             internal const int IFNAMSIZ = 16;
             public fixed byte ifr_name[IFNAMSIZ];

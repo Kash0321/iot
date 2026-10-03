@@ -1,11 +1,8 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
-using System.Interop;
 using System.Drawing;
-using System.Drawing.Imaging;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
@@ -68,7 +65,7 @@ namespace Iot.Device.LEDMatrix
             _deviceRows = height / chainRows;
 
             _gpio = new Gpio(mapping, _deviceRows);
-            _controller = new GpioController(PinNumberingScheme.Logical, _gpio);
+            _controller = new GpioController(_gpio);
 
             OpenAndWriteToPin(_mapping.A, PinValue.Low);
             OpenAndWriteToPin(_mapping.B, PinValue.Low);
@@ -235,10 +232,8 @@ namespace Iot.Device.LEDMatrix
         /// <param name="blue">blue color value</param>
         /// <param name="backBuffer">true if to draw on back buffer, false to draw on the forground buffer</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe void Fill(byte red, byte green, byte blue, bool backBuffer = false)
-        {
+        public unsafe void Fill(byte red, byte green, byte blue, bool backBuffer = false) =>
             FillRectangle(0, 0, Width, Height, red, green, blue, backBuffer);
-        }
 
         /// <summary>
         /// Set color of specific pixel on the forground buffer display
@@ -249,10 +244,8 @@ namespace Iot.Device.LEDMatrix
         /// <param name="green">green color value</param>
         /// <param name="blue">blue color value</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void SetPixel(int column, int row, byte red, byte green, byte blue)
-        {
+        public void SetPixel(int column, int row, byte red, byte green, byte blue) =>
             SetPixel(column, row, red, green, blue, _colorsBuffer);
-        }
 
         /// <summary>
         /// Set color of specific pixel on the background buffer display
@@ -263,10 +256,8 @@ namespace Iot.Device.LEDMatrix
         /// <param name="green">green color value</param>
         /// <param name="blue">blue color value</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void SetBackBufferPixel(int column, int row, byte red, byte green, byte blue)
-        {
+        public void SetBackBufferPixel(int column, int row, byte red, byte green, byte blue) =>
             SetPixel(column, row, red, green, blue, _colorsBackBuffer);
-        }
 
         private void SetPixel(int column, int row, byte red, byte green, byte blue, byte[] colorsBuffer)
         {
@@ -351,7 +342,7 @@ namespace Iot.Device.LEDMatrix
         /// </summary>
         public void Dispose()
         {
-            if (_controller != null)
+            if (_controller is object)
             {
                 StopRendering();
 
@@ -361,7 +352,7 @@ namespace Iot.Device.LEDMatrix
                 }
 
                 _controller.Dispose();
-                _controller = null;
+                _controller = null!;
             }
         }
 
@@ -394,7 +385,7 @@ namespace Iot.Device.LEDMatrix
         /// <param name="y">Upper left y coordinate on the display</param>
         /// <param name="bitmap">System.Drawing.Bitmap object to draw</param>
         /// <param name="backBuffer">true if want use back buffer, false otherwise</param>
-        public unsafe void DrawBitmap(int x, int y, Bitmap bitmap, bool backBuffer = false)
+        public void DrawBitmap(int x, int y, BitmapImage bitmap, bool backBuffer = false)
         {
             if (y >= Height || x >= Width || x + bitmap.Width <= 0 || y + bitmap.Height <= 0)
             {
@@ -403,36 +394,25 @@ namespace Iot.Device.LEDMatrix
 
             byte[] buffer = backBuffer ? _colorsBackBuffer : _colorsBuffer;
 
-            Rectangle fullImageRectangle = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
             Rectangle partialBitmap = new Rectangle(x, y, bitmap.Width, bitmap.Height);
             partialBitmap.Intersect(new Rectangle(0, 0, Width, Height));
 
-            BitmapData bitmapData =
-                bitmap.LockBits(fullImageRectangle, ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+            int bmpStride = bitmap.Stride;
+            int pos = 3 * ((y < 0 ? Math.Abs(y) * bitmap.Width : 0) + (x < 0 ? Math.Abs(x) : 0));
+            int stride = (bmpStride - 3 * bitmap.Width) + 3 * (bitmap.Width - partialBitmap.Width);
 
-            try
+            Span<byte> span = bitmap.AsByteSpan();
+
+            for (int j = 0; j < partialBitmap.Height; j++)
             {
-                int pos = 3 * ((y < 0 ? Math.Abs(y) * bitmap.Width : 0) + (x < 0 ? Math.Abs(x) : 0));
-                int stride = (bitmapData.Stride - 3 * bitmap.Width) + 3 * (bitmap.Width - partialBitmap.Width);
-
-                Span<byte> span = new Span<byte>((void*)bitmapData.Scan0,
-                    fullImageRectangle.Width * fullImageRectangle.Height * 3);
-
-                for (int j = 0; j < partialBitmap.Height; j++)
+                for (int i = 0; i < partialBitmap.Width; i++)
                 {
-                    for (int i = 0; i < partialBitmap.Width; i++)
-                    {
-                        SetPixel(partialBitmap.X + i, partialBitmap.Y + j, span[pos + 2], span[pos + 1], span[pos],
-                            buffer);
-                        pos += 3;
-                    }
-
-                    pos += stride;
+                    SetPixel(partialBitmap.X + i, partialBitmap.Y + j, span[pos + 2], span[pos + 1], span[pos],
+                        buffer);
+                    pos += 3;
                 }
-            }
-            finally
-            {
-                bitmap.UnlockBits(bitmapData);
+
+                pos += stride;
             }
         }
 
@@ -450,7 +430,7 @@ namespace Iot.Device.LEDMatrix
         /// <param name="repGreen">replacement color for the green color</param>
         /// <param name="repBlue">replacement color for the blue color</param>
         /// <param name="backBuffer">true if want use back buffer, false otherwise</param>
-        public unsafe void DrawBitmap(int x, int y, Bitmap bitmap, byte red, byte green, byte blue, byte repRed,
+        public void DrawBitmap(int x, int y, BitmapImage bitmap, byte red, byte green, byte blue, byte repRed,
             byte repGreen, byte repBlue, bool backBuffer = false)
         {
             if (y >= Height || x >= Width || x + bitmap.Width <= 0 || y + bitmap.Height <= 0)
@@ -467,38 +447,29 @@ namespace Iot.Device.LEDMatrix
             int coorX = Math.Max(0, x);
             int coorY = Math.Max(0, y);
 
-            BitmapData bitmapData = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
-                ImageLockMode.ReadOnly, PixelFormat.Format24bppRgb);
+            int bmpStride = bitmap.Stride;
+            int pos = 3 * (bitmapY * bitmap.Width + bitmapX);
+            int stride = (bmpStride - 3 * bitmap.Width) + 3 * (bitmap.Width - bitmapWidth);
 
-            try
+            Span<byte> span = bitmap.AsByteSpan();
+
+            for (int j = 0; j < bitmapHeight; j++)
             {
-                int pos = 3 * (bitmapY * bitmap.Width + bitmapX);
-                int stride = (bitmapData.Stride - 3 * bitmap.Width) + 3 * (bitmap.Width - bitmapWidth);
-
-                Span<byte> span = new Span<byte>((void*)bitmapData.Scan0, bitmapData.Stride * bitmap.Height);
-
-                for (int j = 0; j < bitmapHeight; j++)
+                for (int i = 0; i < bitmapWidth; i++)
                 {
-                    for (int i = 0; i < bitmapWidth; i++)
+                    if (red == span[pos + 2] && green == span[pos + 1] && blue == span[pos])
                     {
-                        if (red == span[pos + 2] && green == span[pos + 1] && blue == span[pos])
-                        {
-                            SetPixel(coorX + i, coorY + j, repRed, repGreen, repBlue, buffer);
-                        }
-                        else
-                        {
-                            SetPixel(coorX + i, coorY + j, span[pos + 2], span[pos + 1], span[pos], buffer);
-                        }
-
-                        pos += 3;
+                        SetPixel(coorX + i, coorY + j, repRed, repGreen, repBlue, buffer);
+                    }
+                    else
+                    {
+                        SetPixel(coorX + i, coorY + j, span[pos + 2], span[pos + 1], span[pos], buffer);
                     }
 
-                    pos += stride;
+                    pos += 3;
                 }
-            }
-            finally
-            {
-                bitmap.UnlockBits(bitmapData);
+
+                pos += stride;
             }
         }
 
@@ -630,7 +601,7 @@ namespace Iot.Device.LEDMatrix
         private void Render()
         {
             Thread.CurrentThread.Priority = ThreadPriority.Highest;
-            System.Interop.ThreadHelper.SetCurrentThreadHighPriority();
+            Interop.ThreadHelper.SetCurrentThreadHighPriority();
 
             _safeToDispose = false;
 

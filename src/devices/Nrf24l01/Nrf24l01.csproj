@@ -1,14 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFrameworks>$(DefaultBindingTfms)</TargetFrameworks>
     <EnableDefaultItems>false</EnableDefaultItems>
   </PropertyGroup>
-
   <ItemGroup>
-    <ProjectReference Include="$(MainLibraryPath)System.Device.Gpio.csproj">
-      <AdditionalProperties>$(AdditionalProperties);RuntimeIdentifier=linux</AdditionalProperties>
-    </ProjectReference>
     <Compile Include="Command.cs" />
     <Compile Include="DataRate.cs" />
     <Compile Include="DataReceivedEventArgs.cs" />
@@ -19,8 +14,7 @@
     <Compile Include="Register.cs" />
     <Compile Include="WorkingMode.cs" />
   </ItemGroup>
-
-  <ItemGroup> 
+  <ItemGroup>
     <None Remove="README.md" />
     <None Remove="sensor.jpg" />
   </ItemGroup>

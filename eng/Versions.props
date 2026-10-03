@@ -1,23 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
+    <!-- Disabling the check for End of live TFMs since we still target netcoreapp 2.1 -->
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
     <PreReleaseVersionLabel>prerelease</PreReleaseVersionLabel>
-    <MicrosoftDotNetGenAPIPackageVersion>5.0.0-beta.20201.2</MicrosoftDotNetGenAPIPackageVersion>
+    <MicrosoftDotNetGenAPIPackageVersion>9.0.0-beta.26301.4</MicrosoftDotNetGenAPIPackageVersion>
     <!-- dotnet/corefx dependencies -->
-    <SystemDrawingCommonPackageVersion>4.6.0</SystemDrawingCommonPackageVersion>
-    <SystemIOPortsPackageVersion>4.6.0</SystemIOPortsPackageVersion>
-    <MicrosoftWin32RegistryPackageVersion>4.6.0</MicrosoftWin32RegistryPackageVersion>
-    <SystemRuntimeWindowsRuntimePackageVersion>4.6.0</SystemRuntimeWindowsRuntimePackageVersion>
-  </PropertyGroup>
-  <!-- Restore sources -->
-  <PropertyGroup>
-    <RestoreSources>
-      $(RestoreSources);
-      https://dotnetfeed.blob.core.windows.net/dotnet-tools-internal/index.json;
-      https://dotnetfeed.blob.core.windows.net/dotnet-iot/index.json;
-      https://dotnetfeed.blob.core.windows.net/dotnet-core/index.json;
-      https://dotnet.myget.org/F/dotnet-core/api/v3/index.json;
-      https://api.nuget.org/v3/index.json;
-    </RestoreSources>
+    <SystemDrawingCommonPackageVersion>10.0.12</SystemDrawingCommonPackageVersion>
+    <SystemIOPortsPackageVersion>10.0.12</SystemIOPortsPackageVersion>
+    <MicrosoftWin32RegistryPackageVersion>5.0.0</MicrosoftWin32RegistryPackageVersion>
+    <SystemManagementPackageVersion>10.0.12</SystemManagementPackageVersion>
+    <SystemThreadingTasksExtensionsPackageVersion>4.6.3</SystemThreadingTasksExtensionsPackageVersion>
+    <SystemMemoryPackageVersion>4.6.3</SystemMemoryPackageVersion>
+    <SystemRuntimeInteropServicesWindowsRuntimePackageVersion>4.3.0</SystemRuntimeInteropServicesWindowsRuntimePackageVersion>
+    <MicrosoftExtensionsLoggingConsolePackageVersion>8.0.1</MicrosoftExtensionsLoggingConsolePackageVersion>
+    <MicrosoftExtensionsLoggingPackageVersion>10.0.12</MicrosoftExtensionsLoggingPackageVersion>
+    <MicrosoftExtensionsLoggingAbstractionsPackageVersion>10.0.12</MicrosoftExtensionsLoggingAbstractionsPackageVersion>
+    <SystemTextJsonPackageVersion>10.0.12</SystemTextJsonPackageVersion>
+    <SystemIOPipelinesVersion>10.0.12</SystemIOPipelinesVersion>
   </PropertyGroup>
 </Project>

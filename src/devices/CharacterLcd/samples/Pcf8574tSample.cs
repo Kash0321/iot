@@ -1,14 +1,13 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
-// See the LICENSE file in the project root for more information.
 
 using System;
 using System.Device.Gpio;
 using System.Device.I2c;
 using System.Diagnostics;
-using System.Drawing;
 using System.Text;
 using System.Timers;
+using System.Drawing;
 using Iot.Device.Pcx857x;
 
 namespace Iot.Device.CharacterLcd.Samples
@@ -17,8 +16,8 @@ namespace Iot.Device.CharacterLcd.Samples
     {
         private const string Twenty = "123456789\u0008123456789\u0009";
         private const string Thirty = Twenty + "123456789\u000a";
-        private const string Fourty = Thirty + "123456789\u000b";
-        private const string Eighty = Fourty + "123456789\u000c123456789\u000d123456789\u000e123456789\u000f";
+        private const string Forty = Thirty + "123456789\u000b";
+        private const string Eighty = Forty + "123456789\u000c123456789\u000d123456789\u000e123456789\u000f";
 
         public static void SampleEntryPoint()
         {
@@ -27,7 +26,7 @@ namespace Iot.Device.CharacterLcd.Samples
             // for PCF8574AT i2c addresses can be between 0x3f and 0x38 depending on bridged solder jumpers
             var i2cDevice = I2cDevice.Create(new I2cConnectionSettings(busId: 1, deviceAddress: 0x27));
             var driver = new Pcf8574(i2cDevice);
-            var lcd = new Lcd1602(registerSelectPin: 0, enablePin: 2, dataPins: new int[] { 4, 5, 6, 7 }, backlightPin: 3, readWritePin: 1, controller: new GpioController(PinNumberingScheme.Logical, driver));
+            var lcd = new Lcd1602(registerSelectPin: 0, enablePin: 2, dataPins: new int[] { 4, 5, 6, 7 }, backlightPin: 3, readWritePin: 1, controller: new GpioController(driver));
 
             using (lcd)
             {
@@ -50,11 +49,11 @@ namespace Iot.Device.CharacterLcd.Samples
 
                 // Long string
                 TestPrompt("Twenty", lcd, l => l.Write(Twenty));
-                TestPrompt("Fourty", lcd, l => l.Write(Fourty));
+                TestPrompt("Forty", lcd, l => l.Write(Forty));
                 TestPrompt("Eighty", lcd, l => l.Write(Eighty));
 
                 TestPrompt("Twenty-", lcd, l => WriteFromEnd(l, Twenty));
-                TestPrompt("Fourty-", lcd, l => WriteFromEnd(l, Fourty));
+                TestPrompt("Forty-", lcd, l => WriteFromEnd(l, Forty));
                 TestPrompt("Eighty-", lcd, l => WriteFromEnd(l, Eighty));
 
                 TestPrompt("Wrap", lcd, l => l.Write(new string('*', 80) + ">>>>>"));
@@ -217,7 +216,7 @@ namespace Iot.Device.CharacterLcd.Samples
             foreach (var color in colors)
             {
                 lcd.Clear();
-                lcd.Write(color.Name);
+                lcd.Write(color.ToString());
 
                 lcd.SetBacklightColor(color);
                 System.Threading.Thread.Sleep(1000);

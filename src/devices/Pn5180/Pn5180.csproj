@@ -1,0 +1,14 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>$(DefaultBindingTfms)</TargetFrameworks>
+    <EnableDefaultItems>false</EnableDefaultItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Card\CardRfid.csproj" />
+    <ProjectReference Include="..\Card\Mifare\Mifare.csproj" />
+    <ProjectReference Include="..\Card\Icode\Icode.csproj" />
+  </ItemGroup>
+</Project>

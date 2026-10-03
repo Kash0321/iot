@@ -39,7 +39,7 @@ More sensors are supported and being tested like the Grove Led Bar. Note that th
 
 ## How to use the driver
 
-The main [GrovePi samples](./samples) contains a series of test showing how to use some of the classes.
+The main [GrovePi samples](https://github.com/dotnet/iot/tree/main/src/devices/GrovePi/samples) contains a series of test showing how to use some of the classes.
 
 Create a ```GrovePi``` class.
 
@@ -100,7 +100,7 @@ Note that Analogic pins can be used for both analogic and digital sensors. In ca
 
 ## How to use the high level classes
 
-There are high level classes to handle directly sensors like analogic sensors, buzzers, leds, buttons. All the sensors are using only 1 pin out of the 2 available. There is nothing presenting you to use the 2 pins if you have a sensor using 2 pins. Just make sue you won't use the adjacent Grove plug in this case.
+There are high level classes to handle directly sensors like analogic sensors, buzzers, leds, buttons. All the sensors are using only 1 pin out of the 2 available. There is nothing presenting you to use the 2 pins if you have a sensor using 2 pins. Just make sure you won't use the adjacent Grove plug in this case.
 
 Using the sensor classes is straight forward. Just reference a class and initialized it. Access properties which are common to all sensors, ```Value``` and ```ToString()```.
 
@@ -117,7 +117,7 @@ while (!Console.KeyAvailable)
 
 ## Tests
 
-A series of hardware tests for sensors are available in [GrovePi.samples](./samples). Those hardware tests offers a variety of sensors.
+A series of hardware tests for sensors are available in [GrovePi.samples](https://github.com/dotnet/iot/tree/main/src/devices/GrovePi/samples). Those hardware tests offers a variety of sensors.
 
 ```csharp
 Console.WriteLine("Hello GrovePi!");
@@ -152,3 +152,7 @@ while (!Console.KeyAvailable)
 
 Console.CursorTop += 5;
 ```
+
+Once you have GrovePi on a Raspberry Pi, it looks like this:
+
+![sample](sample.jpg)
