@@ -41,17 +41,17 @@ namespace DeviceApiTester.Commands.Gpio
 
             if (LedPin != null)
             {
-                Console.WriteLine($"Driver={Driver}, Scheme={Scheme}, ButtonPin={ButtonPin}, LedPin={LedPin}, PressedValue={PressedValue}, OnValue={OnValue}");
+                Console.WriteLine($"Driver={Driver}, ButtonPin={ButtonPin}, LedPin={LedPin}, PressedValue={PressedValue}, OnValue={OnValue}");
             }
             else
             {
-                Console.WriteLine($"Driver={Driver}, Scheme={Scheme}, ButtonPin={ButtonPin}, PressedValue={PressedValue}, OnValue={OnValue}");
+                Console.WriteLine($"Driver={Driver}, ButtonPin={ButtonPin}, PressedValue={PressedValue}, OnValue={OnValue}");
             }
 
             using GpioController controller = CreateGpioController();
             using var cancelEvent = new ManualResetEvent(false);
             int count = 0;
-            Console.WriteLine($"Listening for button presses on GPIO {Enum.GetName(typeof(PinNumberingScheme), Scheme)} pin {ButtonPin} . . .");
+            Console.WriteLine($"Listening for button presses on GPIO pin {ButtonPin} . . .");
 
             // This example runs until Ctrl+C (or Ctrl+Break) is pressed, so register a local function handler.
             Console.CancelKeyPress += Console_CancelKeyPress;
@@ -70,13 +70,13 @@ namespace DeviceApiTester.Commands.Gpio
 
             // Set the event handler for changes to the pin value.
             PinEventTypes bothPinEventTypes = PinEventTypes.Falling | PinEventTypes.Rising;
-            controller.RegisterCallbackForPinValueChangedEvent(ButtonPin, bothPinEventTypes, valueChangeHandler);
+            controller.RegisterCallbackForPinValueChangedEvent(ButtonPin, bothPinEventTypes, ValueChangeHandler);
 
             // Wait for the cancel (Ctrl+C) console event.
             cancelEvent.WaitOne();
 
             // Unregister the event handler for changes to the pin value
-            controller.UnregisterCallbackForPinValueChangedEvent(ButtonPin, valueChangeHandler);
+            controller.UnregisterCallbackForPinValueChangedEvent(ButtonPin, ValueChangeHandler);
 
             controller.ClosePin(ButtonPin);
             if (LedPin != null)
@@ -90,7 +90,7 @@ namespace DeviceApiTester.Commands.Gpio
             return Task.FromResult(0);
 
             // Declare a local function to handle the pin value changed events.
-            void valueChangeHandler(object sender, PinValueChangedEventArgs pinValueChangedEventArgs)
+            void ValueChangeHandler(object sender, PinValueChangedEventArgs pinValueChangedEventArgs)
             {
                 if (LedPin != null)
                 {

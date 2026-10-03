@@ -1,6 +1,8 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Diagnostics.CodeAnalysis;
+
 namespace System.Device.Gpio.Drivers;
 
 /// <summary>
@@ -32,15 +34,22 @@ public abstract class UnixDriver : GpioDriver
         }
 
         UnixDriver? driver = null;
-        try
+
+        if (TryCreate(() => new LibGpiodDriver(0), out driver))
         {
-            driver = new LibGpiodDriver();
-        }
-        catch (PlatformNotSupportedException)
-        {
-            driver = new SysFsDriver();
+            return driver;
         }
 
-        return driver;
+        if (TryCreate(() => new LibGpiodV2Driver(0), out driver))
+        {
+            return driver;
+        }
+
+        if (TryCreate(() => new SysFsDriver(), out driver))
+        {
+            return driver;
+        }
+
+        throw new PlatformNotSupportedException("No unix driver appears to be runnable");
     }
 }

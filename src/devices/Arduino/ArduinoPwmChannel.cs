@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Device;
 using System.Device.Pwm;
 using System.Linq;
 using System.Text;
@@ -110,8 +111,8 @@ namespace Iot.Device.Arduino
         public override void Stop()
         {
             _enabled = false;
-            _board.Firmata.SetPinMode(_pin, SupportedMode.DigitalInput);
             Update();
+            _board.Firmata.SetPinMode(_pin, SupportedMode.DigitalInput);
         }
 
         private void Update()
@@ -123,6 +124,11 @@ namespace Iot.Device.Arduino
         {
             Stop();
             base.Dispose(disposing);
+        }
+
+        public override ComponentInformation QueryComponentInformation()
+        {
+            return new ComponentInformation(this, "Arduino PWM Channel");
         }
     }
 }

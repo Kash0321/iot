@@ -5,23 +5,33 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Runtime.InteropServices;
 using System.Collections.Concurrent;
+using System.Device.Gpio.Libgpiod.V1;
 using System.Diagnostics;
+using System.Linq;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using LibgpiodV1 = Interop.LibgpiodV1;
 
 namespace System.Device.Gpio.Drivers;
 
 /// <summary>
-/// This driver uses the Libgpiod library to get user-level access to the gpio ports.
+/// This driver uses libgpiod v0/1 to get user-level access to the gpio ports.
 /// It superseeds the SysFsDriver, but requires that libgpiod is installed. To do so, run
 /// "sudo apt install -y libgpiod-dev".
+/// <remarks>
+/// This driver uses the older (V1) libgpiod infrastructure. To use the new V2 infrastructure, use <see cref="LibGpiodV2Driver"/>.
+/// At the time of this writing, that one was only available from source, not as apt package.</remarks>
 /// </summary>
 public class LibGpiodDriver : UnixDriver
 {
     private static string s_consumerName = Process.GetCurrentProcess().ProcessName;
     private readonly object _pinNumberLock;
-    private readonly ConcurrentDictionary<int, SafeLineHandle> _pinNumberToSafeLineHandle;
+    private readonly ConcurrentDictionary<int, LineHandle> _pinNumberToSafeLineHandle;
     private readonly ConcurrentDictionary<int, LibGpiodDriverEventHandler> _pinNumberToEventHandler;
     private readonly int _pinCount;
+    private readonly ConcurrentDictionary<int, PinValue> _pinValue;
     private SafeChipHandle _chip;
+    private int _chipNumber;
 
     /// <inheritdoc />
     protected internal override int PinCount => _pinCount;
@@ -29,7 +39,7 @@ public class LibGpiodDriver : UnixDriver
     // for use the bias flags we need libgpiod version 1.5 or later
     private static bool IsLibgpiodVersion1_5orHigher()
     {
-        IntPtr libgpiodVersionPtr = Interop.libgpiod.gpiod_version_string();
+        IntPtr libgpiodVersionPtr = LibgpiodV1.gpiod_version_string();
         string? libgpiodVersionMatch = Marshal.PtrToStringAnsi(libgpiodVersionPtr);
 
         if (libgpiodVersionMatch is object)
@@ -67,20 +77,82 @@ public class LibGpiodDriver : UnixDriver
         try
         {
             _pinNumberLock = new object();
-            _chip = Interop.libgpiod.gpiod_chip_open_by_number(gpioChip);
-            if (_chip == null)
+            _chipNumber = gpioChip;
+            _chip = new SafeChipHandle(LibgpiodV1.gpiod_chip_open_by_number(gpioChip));
+            if (_chip == null || _chip.IsInvalid || _chip.IsClosed)
             {
-                throw ExceptionHelper.GetIOException(ExceptionResource.NoChipFound, Marshal.GetLastWin32Error());
+                throw ExceptionHelper.GetIOException(ExceptionResource.NoChipFound, ExceptionHelper.GetLastErrorMessage());
             }
 
-            _pinCount = Interop.libgpiod.gpiod_chip_num_lines(_chip);
+            _pinCount = LibgpiodV1.gpiod_chip_num_lines(_chip);
             _pinNumberToEventHandler = new ConcurrentDictionary<int, LibGpiodDriverEventHandler>();
-            _pinNumberToSafeLineHandle = new ConcurrentDictionary<int, SafeLineHandle>();
+            _pinNumberToSafeLineHandle = new ConcurrentDictionary<int, LineHandle>();
+            _pinValue = new ConcurrentDictionary<int, PinValue>();
         }
         catch (DllNotFoundException)
         {
             throw ExceptionHelper.GetPlatformNotSupportedException(ExceptionResource.LibGpiodNotInstalled);
         }
+    }
+
+    /// <summary>
+    /// Construct an instance of this driver with the provided chip.
+    /// </summary>
+    /// <param name="chip">The chip to use. Should be one of the elements returned by <see cref="GetAvailableChips"/></param>
+    public LibGpiodDriver(GpioChipInfo chip)
+        : this(chip.Id)
+    {
+    }
+
+    /// <summary>
+    /// Returns the set of available chips for this driver
+    /// </summary>
+    /// <returns>A list of <see cref="GpioChipInfo"/> instances</returns>
+    public static IList<GpioChipInfo> GetAvailableChips()
+    {
+        List<GpioChipInfo> result = new List<GpioChipInfo>();
+        var iterator = new SafeChipIteratorHandle(LibgpiodV1.gpiod_chip_iter_new());
+        while (true)
+        {
+            SafeChipHandle chip = new SafeChipHandle(LibgpiodV1.gpiod_chip_iter_next_noclose(iterator));
+            if (chip.IsInvalid)
+            {
+                break;
+            }
+
+            int numLines = LibgpiodV1.gpiod_chip_num_lines(chip);
+            string name = Marshal.PtrToStringAnsi(LibgpiodV1.gpiod_chip_name(chip)) ?? string.Empty;
+            string label = Marshal.PtrToStringAnsi(LibgpiodV1.gpiod_chip_label(chip)) ?? string.Empty;
+            if (!result.Any(x => x.Label == label && x.NumLines == numLines))
+            {
+                // The iterator may find duplicates, but we skip them here
+                // Need to find the number at the end of the name (e.g. 15 in gpiochip15)
+                int id = 0;
+                int numberOfDigitsAtEnd = 0;
+                for (var i = name.Length - 1; i >= 0; i--)
+                {
+                    if (!char.IsDigit(name[i]))
+                    {
+                        break;
+                    }
+
+                    numberOfDigitsAtEnd++;
+                }
+
+                string theNumber = name[^numberOfDigitsAtEnd..];
+                if (!Int32.TryParse(theNumber, CultureInfo.InvariantCulture, out id))
+                {
+                    id = 0;
+                }
+
+                result.Add(new GpioChipInfo(id, name, label, numLines));
+            }
+
+            chip.Dispose();
+        }
+
+        iterator.Dispose();
+        return result;
     }
 
     /// <inheritdoc/>
@@ -110,12 +182,12 @@ public class LibGpiodDriver : UnixDriver
     {
         lock (_pinNumberLock)
         {
-            _pinNumberToSafeLineHandle.TryGetValue(pinNumber, out SafeLineHandle? pinHandle);
+            _pinNumberToSafeLineHandle.TryGetValue(pinNumber, out LineHandle? pinHandle);
 
-            if (pinHandle is null || (pinHandle is object && !Interop.libgpiod.gpiod_line_is_free(pinHandle)))
+            if (pinHandle is null || (pinHandle is object && !LibgpiodV1.gpiod_line_is_free(pinHandle.Handle)))
             {
                 pinHandle?.Dispose();
-                pinHandle = Interop.libgpiod.gpiod_chip_get_line(_chip, pinNumber);
+                pinHandle = new LineHandle(LibgpiodV1.gpiod_chip_get_line(_chip, pinNumber));
                 _pinNumberToSafeLineHandle[pinNumber] = pinHandle;
             }
 
@@ -128,12 +200,13 @@ public class LibGpiodDriver : UnixDriver
     {
         lock (_pinNumberLock)
         {
-            if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out SafeLineHandle? pinHandle) &&
+            if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out LineHandle? pinHandle) &&
                 !IsListeningEvent(pinNumber))
             {
                 pinHandle?.Dispose();
                 // We know this works
                 _pinNumberToSafeLineHandle.TryRemove(pinNumber, out _);
+                _pinValue.TryRemove(pinNumber, out _);
             }
         }
     }
@@ -144,15 +217,11 @@ public class LibGpiodDriver : UnixDriver
     }
 
     /// <inheritdoc/>
-    protected internal override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) =>
-        throw ExceptionHelper.GetPlatformNotSupportedException(ExceptionResource.ConvertPinNumberingSchemaError);
-
-    /// <inheritdoc/>
     protected internal override PinMode GetPinMode(int pinNumber)
     {
         lock (_pinNumberLock)
         {
-            if (!_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out SafeLineHandle? pinHandle))
+            if (!_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out LineHandle? pinHandle))
             {
                 throw ExceptionHelper.GetInvalidOperationException(ExceptionResource.PinNotOpenedError,
                     pin: pinNumber);
@@ -180,13 +249,9 @@ public class LibGpiodDriver : UnixDriver
                 return;
             }
 
-            SafeLineHandle pinHandle = Interop.libgpiod.gpiod_chip_get_line(_chip, pinNumber);
-            if (pinHandle == null)
-            {
-                throw ExceptionHelper.GetIOException(ExceptionResource.OpenPinError, Marshal.GetLastWin32Error());
-            }
+            LineHandle pinHandle = new LineHandle(LibgpiodV1.gpiod_chip_get_line(_chip, pinNumber));
 
-            int mode = Interop.libgpiod.gpiod_line_direction(pinHandle);
+            int mode = LibgpiodV1.gpiod_line_direction(pinHandle.Handle);
             if (mode == 1)
             {
                 pinHandle.PinMode = PinMode.Input;
@@ -198,7 +263,7 @@ public class LibGpiodDriver : UnixDriver
 
             if (s_isLibgpiodVersion1_5orHigher && pinHandle.PinMode == PinMode.Input)
             {
-                int bias = Interop.libgpiod.gpiod_line_bias(pinHandle);
+                int bias = LibgpiodV1.gpiod_line_bias(pinHandle.Handle);
                 if (bias == (int)RequestFlag.GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_DOWN)
                 {
                     pinHandle.PinMode = PinMode.InputPullDown;
@@ -211,24 +276,40 @@ public class LibGpiodDriver : UnixDriver
             }
 
             _pinNumberToSafeLineHandle.TryAdd(pinNumber, pinHandle);
+            // This is setting up a default value without reading the driver as it's the default behavior.
+            // If the Setmode with an initial value is used, this is going to be corrected automatically
+            _pinValue.TryAdd(pinNumber, PinValue.Low);
         }
     }
 
     /// <inheritdoc/>
     protected internal override PinValue Read(int pinNumber)
     {
-        if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out SafeLineHandle? pinHandle))
+        if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out LineHandle? pinHandle))
         {
-            int result = Interop.libgpiod.gpiod_line_get_value(pinHandle);
+            int result = LibgpiodV1.gpiod_line_get_value(pinHandle.Handle);
             if (result == -1)
             {
-                throw ExceptionHelper.GetIOException(ExceptionResource.ReadPinError, Marshal.GetLastWin32Error(), pinNumber);
+                throw ExceptionHelper.GetIOException(ExceptionResource.ReadPinError, ExceptionHelper.GetLastErrorMessage(), pinNumber);
             }
 
+            _pinValue[pinNumber] = result;
             return result;
         }
 
         throw ExceptionHelper.GetInvalidOperationException(ExceptionResource.PinNotOpenedError, pin: pinNumber);
+    }
+
+    /// <inheritdoc/>
+    protected internal override void Toggle(int pinNumber)
+    {
+        if (!_pinValue.TryGetValue(pinNumber, out PinValue oldValue))
+        {
+            // If the pin value was never set, we need to read it now
+            oldValue = Read(pinNumber);
+        }
+
+        Write(pinNumber, !oldValue);
     }
 
     /// <inheritdoc/>
@@ -253,25 +334,25 @@ public class LibGpiodDriver : UnixDriver
     /// <inheritdoc/>
     protected internal override void SetPinMode(int pinNumber, PinMode mode)
     {
-        if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out SafeLineHandle? pinHandle))
+        if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out LineHandle? pinHandle))
         {
             // This call does not release the handle. It only releases the lock on the handle. Without this, changing the direction of a line is not possible.
             // Line handles cannot be freed and are cached until the chip is closed.
             pinHandle.ReleaseLock();
             int requestResult = mode switch
             {
-                PinMode.Input => Interop.libgpiod.gpiod_line_request_input(pinHandle, s_consumerName),
-                PinMode.InputPullDown => Interop.libgpiod.gpiod_line_request_input_flags(pinHandle, s_consumerName,
+                PinMode.Input => LibgpiodV1.gpiod_line_request_input(pinHandle.Handle, s_consumerName),
+                PinMode.InputPullDown => LibgpiodV1.gpiod_line_request_input_flags(pinHandle.Handle, s_consumerName,
                         (int)RequestFlag.GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_DOWN),
-                PinMode.InputPullUp => Interop.libgpiod.gpiod_line_request_input_flags(pinHandle, s_consumerName,
+                PinMode.InputPullUp => LibgpiodV1.gpiod_line_request_input_flags(pinHandle.Handle, s_consumerName,
                         (int)RequestFlag.GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP),
-                PinMode.Output => Interop.libgpiod.gpiod_line_request_output(pinHandle, s_consumerName, 0),
+                PinMode.Output => LibgpiodV1.gpiod_line_request_output(pinHandle.Handle, s_consumerName, 0),
                 _ => -1,
             };
 
             if (requestResult == -1)
             {
-                throw ExceptionHelper.GetIOException(ExceptionResource.SetPinModeError, Marshal.GetLastWin32Error(),
+                throw ExceptionHelper.GetIOException(ExceptionResource.SetPinModeError, ExceptionHelper.GetLastErrorMessage(),
                     pinNumber);
             }
 
@@ -285,28 +366,29 @@ public class LibGpiodDriver : UnixDriver
     /// <inheritdoc />
     protected internal override void SetPinMode(int pinNumber, PinMode mode, PinValue initialValue)
     {
-        if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out SafeLineHandle? pinHandle))
+        if (_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out LineHandle? pinHandle))
         {
             // This call does not release the handle. It only releases the lock on the handle. Without this, changing the direction of a line is not possible.
             // Line handles cannot be freed and are cached until the chip is closed.
             pinHandle.ReleaseLock();
             int requestResult = mode switch
             {
-                PinMode.Input => Interop.libgpiod.gpiod_line_request_input(pinHandle, s_consumerName),
-                PinMode.InputPullDown => Interop.libgpiod.gpiod_line_request_input_flags(pinHandle, s_consumerName,
+                PinMode.Input => LibgpiodV1.gpiod_line_request_input(pinHandle.Handle, s_consumerName),
+                PinMode.InputPullDown => LibgpiodV1.gpiod_line_request_input_flags(pinHandle.Handle, s_consumerName,
                     (int)RequestFlag.GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_DOWN),
-                PinMode.InputPullUp => Interop.libgpiod.gpiod_line_request_input_flags(pinHandle, s_consumerName,
+                PinMode.InputPullUp => LibgpiodV1.gpiod_line_request_input_flags(pinHandle.Handle, s_consumerName,
                     (int)RequestFlag.GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP),
-                PinMode.Output => Interop.libgpiod.gpiod_line_request_output(pinHandle, s_consumerName, initialValue == PinValue.High ? 1 : 0),
+                PinMode.Output => LibgpiodV1.gpiod_line_request_output(pinHandle.Handle, s_consumerName, initialValue == PinValue.High ? 1 : 0),
                 _ => -1,
             };
 
             if (requestResult == -1)
             {
-                throw ExceptionHelper.GetIOException(ExceptionResource.SetPinModeError, Marshal.GetLastWin32Error(),
+                throw ExceptionHelper.GetIOException(ExceptionResource.SetPinModeError, ExceptionHelper.GetLastErrorMessage(),
                     pinNumber);
             }
 
+            _pinValue[pinNumber] = initialValue;
             pinHandle.PinMode = mode;
             return;
         }
@@ -365,13 +447,31 @@ public class LibGpiodDriver : UnixDriver
     /// <inheritdoc/>
     protected internal override void Write(int pinNumber, PinValue value)
     {
-        if (!_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out SafeLineHandle? pinHandle))
+        if (!_pinNumberToSafeLineHandle.TryGetValue(pinNumber, out LineHandle? pinHandle))
         {
             throw ExceptionHelper.GetInvalidOperationException(ExceptionResource.PinNotOpenedError,
                 pin: pinNumber);
         }
 
-        Interop.libgpiod.gpiod_line_set_value(pinHandle, (value == PinValue.High) ? 1 : 0);
+        LibgpiodV1.gpiod_line_set_value(pinHandle.Handle, (value == PinValue.High) ? 1 : 0);
+        _pinValue[pinNumber] = value;
+    }
+
+    /// <inheritdoc />
+    public override ComponentInformation QueryComponentInformation()
+    {
+        var self = new ComponentInformation(this, "LibGpiodDriver");
+        IntPtr libgpiodVersionPtr = LibgpiodV1.gpiod_version_string();
+        string libgpiodVersion = Marshal.PtrToStringAnsi(libgpiodVersionPtr) ?? string.Empty;
+        self.Properties["LibGpiodVersion"] = libgpiodVersion;
+        self.Properties["ChipInfo"] = GetChipInfo().ToString();
+        return self;
+    }
+
+    /// <inheritdoc />
+    public override GpioChipInfo GetChipInfo()
+    {
+        return GetAvailableChips().First(x => x.Id == _chipNumber);
     }
 
     /// <inheritdoc/>
@@ -392,13 +492,14 @@ public class LibGpiodDriver : UnixDriver
         {
             foreach (int pin in _pinNumberToSafeLineHandle.Keys)
             {
-                if (_pinNumberToSafeLineHandle.TryGetValue(pin, out SafeLineHandle? pinHandle))
+                if (_pinNumberToSafeLineHandle.TryGetValue(pin, out LineHandle? pinHandle))
                 {
                     pinHandle?.Dispose();
                 }
             }
 
             _pinNumberToSafeLineHandle.Clear();
+            _pinValue.Clear();
         }
 
         _chip?.Dispose();

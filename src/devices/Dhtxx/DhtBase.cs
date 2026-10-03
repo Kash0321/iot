@@ -126,14 +126,13 @@ namespace Iot.Device.DHTxx
         /// Create a DHT sensor
         /// </summary>
         /// <param name="pin">The pin number (GPIO number)</param>
-        /// <param name="pinNumberingScheme">The GPIO pin numbering scheme</param>
         /// <param name="gpioController"><see cref="GpioController"/> related with operations on pins</param>
         /// <param name="shouldDispose">True to dispose the Gpio Controller</param>
-        public DhtBase(int pin, PinNumberingScheme pinNumberingScheme = PinNumberingScheme.Logical, GpioController? gpioController = null, bool shouldDispose = true)
+        public DhtBase(int pin, GpioController? gpioController = null, bool shouldDispose = true)
         {
             _protocol = CommunicationProtocol.OneWire;
             _shouldDispose = shouldDispose || gpioController is null;
-            _controller = gpioController ?? new GpioController(pinNumberingScheme);
+            _controller = gpioController ?? new GpioController();
             _pin = pin;
 
             // These sensors typically require 2.5 seconds between read attempts, or the result will be garbage
@@ -280,7 +279,7 @@ namespace Iot.Device.DHTxx
 
             if ((newBuf[4] == ((newBuf[0] + newBuf[1] + newBuf[2] + newBuf[3]) & 0xFF)))
             {
-                _isLastReadSuccessful = (newBuf[0] != 0) || (newBuf[2] != 0);
+                _isLastReadSuccessful = !((newBuf[0] == 0) && (newBuf[1] == 0) && (newBuf[2] == 0) && (newBuf[3] == 0));
             }
             else
             {
@@ -386,13 +385,13 @@ namespace Iot.Device.DHTxx
             if (_shouldDispose)
             {
                 _controller?.Dispose();
-                _controller = null;
             }
             else if (_controller?.IsPinOpen(_pin) ?? false)
             {
                 _controller.ClosePin(_pin);
             }
 
+            _controller = null;
             _i2cDevice?.Dispose();
             _i2cDevice = null;
         }

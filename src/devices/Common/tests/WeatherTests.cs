@@ -81,33 +81,29 @@ namespace Iot.Device.Common.Tests
         }
 
         [Theory]
-        [InlineData(1011.22, 900)]
-        [InlineData(111.18, 1000)]
-        [InlineData(547.1, 950)]
+        [InlineData(988.50, 900)]
+        [InlineData(110.88, 1000)]
         public void AltitudeIsCalculatedCorrectlyAtMslpAndDefaultTemp(double expected, double hpa)
         {
             Length altitude = WeatherHelper.CalculateAltitude(Pressure.FromHectopascals(hpa));
-            Assert.Equal(expected, Math.Round(altitude.Meters, 2));
+            Assert.Equal(altitude.Meters, expected, 0.5);
         }
 
         [Theory]
-        [InlineData(1011.22, 900, 1013.25)]
-        [InlineData(111.18, 1000, 1013.25)]
-        [InlineData(547.1, 950, 1013.25)]
-        public void AltitudeIsCalculatedCorrectlyAtDefaultTemp(double expected, double hpa, double seaLevelHpa)
-        {
-            Length altitude = WeatherHelper.CalculateAltitude(Pressure.FromHectopascals(hpa), Pressure.FromHectopascals(seaLevelHpa));
-            Assert.Equal(expected, Math.Round(altitude.Meters, 2));
-        }
-
-        [Theory]
-        [InlineData(1011.22, 900, 1013.25, 15)]
-        [InlineData(111.18, 1000, 1013.25, 15)]
-        [InlineData(547.1, 950, 1013.25, 15)]
+        [InlineData(0, 1013.25, 1013.25, 15)]
+        [InlineData(1000.13, 898.75, 1013.25, 15)]
+        [InlineData(3000.43, 701.09, 1013.25, 15)]
+        [InlineData(540.43, 950, 1013.25, 15)]
         public void AltitudeIsCalculatedCorrectly(double expected, double hpa, double seaLevelHpa, double celsius)
         {
-            Length altitude = WeatherHelper.CalculateAltitude(Pressure.FromHectopascals(hpa), Pressure.FromHectopascals(seaLevelHpa), Temperature.FromDegreesCelsius(celsius));
+            Length altitude = WeatherHelper.CalculateAltitude(Pressure.FromHectopascals(hpa), Pressure.FromHectopascals(seaLevelHpa));
+
+            // These two formulas should be equivalent.
+            double meters1 = (Math.Pow(seaLevelHpa / hpa, -1 / 5.255) - 1) * ((celsius + 273.15) / -WeatherHelper.DefaultTemperatureGradient);
+            double meters2 = ((celsius + 273.15) / WeatherHelper.DefaultTemperatureGradient) * (1 - Math.Pow(hpa / seaLevelHpa, 1.0 / 5.255));
             Assert.Equal(expected, Math.Round(altitude.Meters, 2));
+            Assert.Equal(meters1, expected, 0.01);
+            Assert.Equal(meters2, expected, 0.01);
         }
 
         [Theory]
@@ -160,6 +156,17 @@ namespace Iot.Device.Common.Tests
         }
 
         [Theory]
+        [InlineData(1113.25, -801.147)]
+        [InlineData(1013.25, 0.0)]
+        [InlineData(913.25, 867.955)]
+        [InlineData(813.25, 1816.617)]
+        public void Pressure2Msl(double pressureHPa, double expectedHeightMsl)
+        {
+            var heightMsl = WeatherHelper.CalculateAltitude(Pressure.FromHectopascals(pressureHPa));
+            Assert.Equal(heightMsl.Meters, expectedHeightMsl, 0.1);
+        }
+
+        [Theory]
         [InlineData(950, 15, 546.89, 10, 1013.19)]
         [InlineData(950, 15, 546.89, 50, 1013.01)]
         [InlineData(950, 15, 546.89, 100, 1012.78)]
@@ -184,6 +191,74 @@ namespace Iot.Device.Common.Tests
                 RelativeHumidity.FromPercent(inHumidity), Temperature.FromDegreesCelsius(outTemp));
 
             Assert.Equal(outHumidityExpected, result.Percent, 3);
+        }
+
+        [Theory]
+        [InlineData(1013.25, 35, 1.1455)]
+        [InlineData(1013.25, 0, 1.2922)]
+        [InlineData(1013.25, -25, 1.4224)]
+        public void CalculateAirDensitySimple(double inPressure, double inTemp, double expected)
+        {
+            var result = WeatherHelper.CalculateAirDensity(Pressure.FromMillibars(inPressure),
+                Temperature.FromDegreesCelsius(inTemp));
+
+            Assert.Equal(expected, result.KilogramsPerCubicMeter, 4);
+        }
+
+        [Theory]
+        [InlineData(1013.25, 35, 0, 1.1455)]
+        [InlineData(1013.25, 35, 50, 1.1335)]
+        [InlineData(1013.25, 35, 100, 1.1214)]
+        public void CalculateAirDensity(double inPressure, double inTemp, double inHumidity, double expected)
+        {
+            var result = WeatherHelper.CalculateAirDensity(Pressure.FromMillibars(inPressure),
+                Temperature.FromDegreesCelsius(inTemp), RelativeHumidity.FromPercent(inHumidity));
+
+            Assert.Equal(expected, result.KilogramsPerCubicMeter, 4);
+        }
+
+        [Theory]
+        // When the wind is calm, the windchill temperature is higher than the actual temperature, because the air close to the skin heats up.
+        // Explained in https://de.wikipedia.org/wiki/Windchill
+        [InlineData(0, 0, 1.75)]
+        [InlineData(10, 5, 9.8)]
+        [InlineData(-10, 20, -17.9)]
+        [InlineData(-15, 40, -27.4)]
+        public void CalculateWindchill(double temperature, double windSpeed, double expected)
+        {
+            var result = WeatherHelper.CalculateWindchill(Temperature.FromDegreesCelsius(temperature),
+                Speed.FromKilometersPerHour(windSpeed));
+
+            Assert.Equal(expected, result.DegreesCelsius, 1);
+        }
+
+        [Theory]
+        [InlineData(20, 38.5, 1013, 68.83)]
+        [InlineData(20, 88.9, 1013, 367.0)]
+        public void CalculateWindForce(double temperature, double windSpeed, double pressure, double expected)
+        {
+            Density airDensity = WeatherHelper.CalculateAirDensity(Pressure.FromHectopascals(pressure),
+                Temperature.FromDegreesCelsius(temperature));
+            var density = WeatherHelper.CalculateWindForce(airDensity, Speed.FromKilometersPerHour(windSpeed), 1.0);
+            Assert.Equal(expected, density.NewtonsPerSquareMeter, 1);
+        }
+
+        [Theory]
+        [InlineData(0, 1013.25, 15, 0)]
+        [InlineData(0, 1020, 15, 0)]
+        [InlineData(0, 1020, -20, 0)]
+        [InlineData(400, 970, 15, 397.989)]
+        [InlineData(400, 970, -5, 399.047)]
+        [InlineData(2000, 940, -5, 1995.953)]
+        public void RoundTripAltitudeAndPressure(double originalAltitude, double originalPressure, double originalTemperature, double expectedResult)
+        {
+            // The expectedResult and the originalAltitude should ideally be equal.
+            Pressure qnh = WeatherHelper.CalculateBarometricPressure(Pressure.FromHectopascals(originalPressure),
+                Temperature.FromDegreesCelsius(originalTemperature), Length.FromMeters(originalAltitude));
+
+            Length altitudeResult = WeatherHelper.CalculateAltitude(Pressure.FromHectopascals(originalPressure), qnh, Temperature.FromDegreesCelsius(originalTemperature));
+
+            Assert.Equal(expectedResult, altitudeResult.Meters, 1E-3);
         }
     }
 }

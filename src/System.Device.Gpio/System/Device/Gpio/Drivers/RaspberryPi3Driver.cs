@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 namespace System.Device.Gpio.Drivers;
 
 /// <summary>
-/// A GPIO driver for the Raspberry Pi 3 or 4, running Raspbian (or, with some limitations, ubuntu)
+/// A GPIO driver for the Raspberry Pi 3 or 4, running Raspbian or Raspberry Pi OS (or, with some limitations, ubuntu)
 /// </summary>
 public class RaspberryPi3Driver : GpioDriver
 {
@@ -89,7 +89,7 @@ public class RaspberryPi3Driver : GpioDriver
 
             if (_linuxDriver == null)
             {
-                throw new PlatformNotSupportedException($"Not a supported Raspberry Pi type: " + boardInfo.BoardModel);
+                throw new PlatformNotSupportedException($"Not a supported Raspberry Pi type: {boardInfo.BoardModel} (0x{((int)boardInfo.BoardModel):X4})");
             }
 
             _setSetRegister = (value) => _linuxDriver.SetRegister = value;
@@ -151,11 +151,7 @@ public class RaspberryPi3Driver : GpioDriver
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static GpioDriver CreateWindows10GpioDriver()
     {
-        // This wrapper is needed to prevent Mono from loading Windows10Driver
-        // which causes all fields to be loaded - one of such fields is WinRT type which does not
-        // exist on Linux which causes TypeLoadException.
-        // Using NoInlining and no explicit type prevents this from happening.
-        return new Windows10Driver();
+        throw new PlatformNotSupportedException();
     }
 
     private GpioDriver InternalDriver
@@ -180,13 +176,7 @@ public class RaspberryPi3Driver : GpioDriver
     /// <inheritdoc/>
     protected internal override void ClosePin(int pinNumber) => InternalDriver.ClosePin(pinNumber);
 
-    /// <inheritdoc/>
-    protected internal override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber)
-    {
-        return InternalDriver.ConvertPinNumberToLogicalNumberingScheme(pinNumber);
-    }
-
-    /// <inheritdoc/>
+    /// <inheritdoc />
     protected internal override PinMode GetPinMode(int pinNumber) => InternalDriver.GetPinMode(pinNumber);
 
     /// <inheritdoc/>
@@ -197,6 +187,9 @@ public class RaspberryPi3Driver : GpioDriver
 
     /// <inheritdoc/>
     protected internal override PinValue Read(int pinNumber) => InternalDriver.Read(pinNumber);
+
+    /// <inheritdoc/>
+    protected internal override void Toggle(int pinNumber) => InternalDriver.Toggle(pinNumber);
 
     /// <inheritdoc/>
     protected internal override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback) => InternalDriver.RemoveCallbackForPinValueChangedEvent(pinNumber, callback);
@@ -278,5 +271,14 @@ public class RaspberryPi3Driver : GpioDriver
         _internalDriver?.Dispose();
         _internalDriver = null!;
         base.Dispose(disposing);
+    }
+
+    /// <inheritdoc />
+    public override ComponentInformation QueryComponentInformation()
+    {
+        var ret = new ComponentInformation(this, "Generic Raspberry Pi Wrapper driver");
+        ret.AddSubComponent(_internalDriver.QueryComponentInformation());
+        ret.Properties["ChipInfo"] = _internalDriver.GetChipInfo().ToString();
+        return ret;
     }
 }

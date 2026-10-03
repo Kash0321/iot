@@ -30,11 +30,25 @@ namespace ArduinoCsCompiler
             _logger = this.GetCurrentClassLogger();
         }
 
-        public IlCapabilities? IlCapabilities => _ilCapabilities;
+        /// <summary>
+        /// Query the hardware capabilities.
+        /// Use the setter to set the value to null, to force an update
+        /// </summary>
+        public IlCapabilities? IlCapabilities
+        {
+            get
+            {
+                return _ilCapabilities;
+            }
+            set
+            {
+                _ilCapabilities = value;
+            }
+        }
 
         protected override void OnErrorMessage(string message, Exception? exception)
         {
-            _compiler.OnCompilerCallback(0, MethodState.ConnectionError, exception);
+            _compiler.OnCompilerCallback(0, message, MethodState.ConnectionError, exception);
             base.OnErrorMessage(message, exception);
         }
 
@@ -188,6 +202,7 @@ namespace ArduinoCsCompiler
                             IntSize = Information.FromBytes(data[6]),
                             PointerSize = Information.FromBytes(data[7]),
                             RamSize = Information.FromBytes(FirmataIlCommandSequence.DecodeInt32(data, 8 + 10)),
+                            ProtocolVersion = FirmataCommandSequence.DecodeInt14(data, 4),
                         };
 
                         _ilCapabilities = ilCapabilities;
@@ -196,7 +211,7 @@ namespace ArduinoCsCompiler
                     }
                     else if (data[2] == (byte)ExecutorCommand.ConditionalBreakpointHit || data[2] == (byte)ExecutorCommand.Variables)
                     {
-                        _compiler.OnCompilerCallback(data[3] | (data[4] << 7), MethodState.Debugging, data);
+                        _compiler.OnCompilerCallback(data[4] | (data[5] << 7), string.Empty, MethodState.Debugging, data);
                     }
                 }
                 else
@@ -233,14 +248,14 @@ namespace ArduinoCsCompiler
                 }
 
                 error = CommandError.Aborted;
-                _compiler.OnCompilerCallback(data[startIndex + 1] | (data[startIndex + 2] << 7), state, results);
+                _compiler.OnCompilerCallback(data[startIndex + 1] | (data[startIndex + 2] << 7), string.Empty, state, results);
             }
             else
             {
                 error = CommandError.None;
                 // The result is a set of arbitrary values, 7-bit encoded (typically one 32 bit or one 64 bit value)
                 var result = FirmataIlCommandSequence.Decode7BitBytes(data.Skip(startIndex + 5).ToArray(), numArgs);
-                _compiler.OnCompilerCallback(data[startIndex + 1] | (data[startIndex + 2] << 7), state, result);
+                _compiler.OnCompilerCallback(data[startIndex + 1] | (data[startIndex + 2] << 7), string.Empty, state, result);
             }
         }
 
@@ -344,7 +359,7 @@ namespace ArduinoCsCompiler
         {
             FirmataIlCommandSequence sequence = new FirmataIlCommandSequence(ExecutorCommand.DeclareMethod);
             sequence.SendInt32(declarationToken);
-            sequence.WriteByte((byte)methodFlags);
+            sequence.SendUInt14((ushort)methodFlags);
             sequence.WriteByte(maxStack);
             sequence.WriteByte(argCount);
             sequence.SendInt32((int)nativeMethod);
@@ -366,7 +381,13 @@ namespace ArduinoCsCompiler
                 for (int i = startIndex; i < startIndex + localsToSend; i++)
                 {
                     sequence.WriteByte((byte)localTypes[i].VariableType);
-                    sequence.SendInt14((short)(localTypes[i].SizeOfField >> 2));
+                    int sizeOfField = localTypes[i].SizeOfField;
+                    if (sizeOfField > 0x3FFF)
+                    {
+                        throw new InvalidOperationException("Variables with size > 2^14 are not supported as locals");
+                    }
+
+                    sequence.SendInt14(sizeOfField);
                 }
 
                 sequence.WriteByte((byte)FirmataCommandSequence.EndSysex);
@@ -390,7 +411,13 @@ namespace ArduinoCsCompiler
                 for (int i = startIndex; i < startIndex + localsToSend; i++)
                 {
                     sequence.WriteByte((byte)argTypes[i].VariableType);
-                    sequence.SendInt14((short)(argTypes[i].SizeOfField >> 2));
+                    int sizeOfField = argTypes[i].SizeOfField;
+                    if (sizeOfField > 0x3FFF)
+                    {
+                        throw new InvalidOperationException("Variables with size > 2^14 are not supported as arguments");
+                    }
+
+                    sequence.SendInt14(sizeOfField);
                 }
 
                 sequence.WriteByte((byte)FirmataCommandSequence.EndSysex);

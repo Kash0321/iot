@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Device.Gpio;
 using System.Diagnostics;
+using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.IO.Ports;
@@ -13,13 +14,11 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading;
-using BuildHat.Models;
 using Iot.Device.BuildHat.Models;
 using Iot.Device.BuildHat.Motors;
 using Iot.Device.BuildHat.Sensors;
 using Iot.Device.Common;
 using Microsoft.Extensions.Logging;
-using SixLabors.ImageSharp;
 using UnitsNet;
 
 namespace Iot.Device.BuildHat
@@ -222,7 +221,7 @@ namespace Iot.Device.BuildHat
             {
                 // Set continuous reading
                 SelectCombiModesAndRead(port, new int[] { 1, 2, 3 }, false);
-                PortWrite($"port {(byte)port} ; pid {(byte)port} 0 0 s1 1 0 0.003 0.01 0 100; set {powerPercent}\r");
+                PortWrite($"port {(byte)port} ; pid {(byte)port} 0 0 s1 1 0 0.003 0.01 0 100 0.01; set {powerPercent}\r");
             }
             else
             {
@@ -297,7 +296,7 @@ namespace Iot.Device.BuildHat
             ActiveMotor motor = (ActiveMotor)_elements[(byte)port];
             // Set continuous reading
             SelectCombiModesAndRead(port, new int[] { 1, 2, 3 }, false);
-            PortWrite($"port {(byte)port} ; pid {(byte)port} 0 0 s1 1 0 0.003 0.01 0 100; set pulse {speed} 0.0 {seconds.ToString(CultureInfo.InvariantCulture)} 0\r");
+            PortWrite($"port {(byte)port} ; pid {(byte)port} 0 0 s1 1 0 0.003 0.01 0 100 0.01; set pulse {speed} 0.0 {seconds.ToString(CultureInfo.InvariantCulture)} 0\r");
             if (blocking)
             {
                 token.WaitHandle.WaitOne((int)(seconds * 1000));
@@ -347,7 +346,7 @@ namespace Iot.Device.BuildHat
             // Set continuous reading
             SelectCombiModesAndRead(port, new int[] { 1, 2, 3 }, false);
             // Ramp uses first param as initial position, second as target, third is how long, foruth is always 0
-            PortWrite($"port {(byte)port} ; pid {(byte)port} 0 1 s4 0.0027777778 0 5 0 .1 3 ; set ramp {actualPositionDouble.ToString(CultureInfo.InvariantCulture)} {newPosition.ToString(CultureInfo.InvariantCulture)} {duration.ToString(CultureInfo.InvariantCulture)} 0\r");
+            PortWrite($"port {(byte)port} ; pid {(byte)port} 0 1 s4 0.0027777778 0 5 0 .1 3 0.01 ; set ramp {actualPositionDouble.ToString(CultureInfo.InvariantCulture)} {newPosition.ToString(CultureInfo.InvariantCulture)} {duration.ToString(CultureInfo.InvariantCulture)} 0\r");
             if (blocking)
             {
                 token.WaitHandle.WaitOne((int)(duration * 1000));
@@ -437,7 +436,7 @@ namespace Iot.Device.BuildHat
             // Set continuous reading
             SelectCombiModesAndRead(port, new int[] { 1, 2, 3 }, false);
             // Ramp uses first param as initial position, second as target, third is how long, foruth is always 0
-            PortWrite($"port {(byte)port} ; pid {(byte)port} 0 1 s4 0.0027777778 0 5 0 .1 3 ; set ramp {actualPositionDouble.ToString(CultureInfo.InvariantCulture)} {newPosition.ToString(CultureInfo.InvariantCulture)} {duration.ToString(CultureInfo.InvariantCulture)} 0\r");
+            PortWrite($"port {(byte)port} ; pid {(byte)port} 0 1 s4 0.0027777778 0 5 0 .1 3 0.01 ; set ramp {actualPositionDouble.ToString(CultureInfo.InvariantCulture)} {newPosition.ToString(CultureInfo.InvariantCulture)} {duration.ToString(CultureInfo.InvariantCulture)} 0\r");
             if (blocking)
             {
                 int pos = motor.Position;
@@ -487,7 +486,7 @@ namespace Iot.Device.BuildHat
             // Set continuous reading
             SelectCombiModesAndRead(port, new int[] { 1, 2, 3 }, false);
             // Ramp uses first param as initial position, second as target, third is how long, foruth is always 0
-            PortWrite($"port {(byte)port} ; pid {(byte)port} 0 1 s4 0.0027777778 0 5 0 .1 3 ; set ramp {actualPositionDouble.ToString(CultureInfo.InvariantCulture)} {newPosition.ToString(CultureInfo.InvariantCulture)} {duration.ToString(CultureInfo.InvariantCulture)} 0\r");
+            PortWrite($"port {(byte)port} ; pid {(byte)port} 0 1 s4 0.0027777778 0 5 0 .1 3 0.01 ; set ramp {actualPositionDouble.ToString(CultureInfo.InvariantCulture)} {newPosition.ToString(CultureInfo.InvariantCulture)} {duration.ToString(CultureInfo.InvariantCulture)} 0\r");
             if (blocking)
             {
                 int pos = motor.Position;
@@ -1159,10 +1158,12 @@ namespace Iot.Device.BuildHat
                                                 case 5:
                                                     if (_sensorType[port] == SensorType.SpikePrimeColorSensor)
                                                     {
-                                                        color.Color = Color.FromRgba((byte)(Convert.ToInt32(elements[inc++]) * 255 / 1024),
-                                                            (byte)(Convert.ToInt32(elements[inc++]) * 255 / 1024),
-                                                            (byte)(Convert.ToInt32(elements[inc++]) * 255 / 1024),
-                                                            (byte)(Convert.ToInt32(elements[inc++]) * 255 / 1024));
+                                                        // Verify the colors here (a and b could be exchanged)
+                                                        color.Color = Color.FromArgb((byte)(Convert.ToInt32(elements[inc + 3]) * 255 / 1024),
+                                                            (byte)(Convert.ToInt32(elements[inc + 1]) * 255 / 1024),
+                                                            (byte)(Convert.ToInt32(elements[inc + 2]) * 255 / 1024),
+                                                            (byte)(Convert.ToInt32(elements[inc + 0]) * 255 / 1024));
+                                                        inc += 4;
                                                         color.IsColorDetected = true;
                                                     }
                                                     else
@@ -1186,7 +1187,7 @@ namespace Iot.Device.BuildHat
                                                     // Normal color mode
                                                     if (!isCombi)
                                                     {
-                                                        color.Color = Color.FromRgb((byte)(Convert.ToInt32(elements[inc++]) * 255 / 400),
+                                                        color.Color = Color.FromArgb((byte)(Convert.ToInt32(elements[inc++]) * 255 / 400),
                                                             (byte)(Convert.ToInt32(elements[inc++]) * 255 / 400),
                                                             (byte)(Convert.ToInt32(elements[inc++]) * 255 / 400));
                                                         color.IsColorDetected = true;

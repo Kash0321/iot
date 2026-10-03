@@ -57,9 +57,8 @@ namespace ArduinoCsCompiler
 
                 _compiler = new MicroCompiler(board, true);
 
-                if (!_compiler.QueryBoardCapabilities(out var caps))
+                if (!_compiler.QueryBoardCapabilities(true, out var caps))
                 {
-                    Logger.LogError("Couldn't query board capabilities. Possibly incompatible firmware");
                     return false;
                 }
 
@@ -67,7 +66,7 @@ namespace ArduinoCsCompiler
                 Logger.LogInformation($"Recommended minimum values are 512 kB of flash and 100 kB of RAM. Some microcontrollers (e.g. ESP32) may allow configuration of the amount of flash " +
                                       $"available for code.");
 
-                if (caps.IntSize != Information.FromBytes(4) || caps.PointerSize != Information.FromBytes(4))
+                if (!caps.IntSize.Equals(Information.FromBytes(4), Information.Zero) || !caps.PointerSize.Equals(Information.FromBytes(4), Information.Zero))
                 {
                     Logger.LogWarning("Board pointer and/or integer size is not 32 bits. This is untested and may lead to unpredictable behavior.");
                 }
@@ -141,7 +140,10 @@ namespace ArduinoCsCompiler
                 CreateKernelForFlashing = false,
                 ForceFlashWrite = !CommandLineOptions.DoNotWriteFlashIfAlreadyCurrent,
                 LaunchProgramFromFlash = true,
-                UseFlashForProgram = true
+                UseFlashForProgram = true,
+                UsePreviewFeatures = CommandLineOptions.UsePreviewFeatures,
+                AdditionalSuppressions = CommandLineOptions.Suppressions,
+                ProcessName = inputInfo.Name,
             };
 
             Logger.LogInformation("Collecting method information and metadata...");
@@ -156,16 +158,20 @@ namespace ArduinoCsCompiler
                 Logger.LogDebug($"Class {stat.Key.FullName}: {stat.Value.TotalBytes} Bytes");
             }
 
-            if (!string.IsNullOrEmpty(CommandLineOptions.TokenMapFile))
-            {
-                set.WriteMapFile(CommandLineOptions.TokenMapFile);
-            }
-
             Logger.LogInformation($"Compile successful. {ErrorManager.NumErrors} Errors, {ErrorManager.NumWarnings} Warnings");
 
             if (!CommandLineOptions.CompileOnly)
             {
-                set.Load(false);
+                try
+                {
+                    set.Load(false);
+                }
+                finally
+                {
+                    // Call this after load, so we have an updated flash usage value available.
+                    // But also call it if load fails (e.g. due to not enough flash memory)
+                    WriteTokenMap(set);
+                }
 
                 if (CommandLineOptions.Run == false)
                 {
@@ -180,7 +186,16 @@ namespace ArduinoCsCompiler
                     {
                         _compiler.ExecuteStaticCtors(set);
                         var remoteMain = set.MainEntryPoint;
-                        remoteMain.InvokeAsync();
+                        if (set.MainEntryPointMethod != null && set.MainEntryPointMethod.GetParameters().Length > 0)
+                        {
+                            // If we're calling a real "main" method, we have to provide an empty string array as argument.
+                            remoteMain.InvokeAsync(new object[] { Array.Empty<string>() });
+                        }
+                        else
+                        {
+                            remoteMain.InvokeAsync();
+                        }
+
                         Logger.LogInformation("Program upload successful. Main method invoked. The program is now running.");
                         return;
                     }
@@ -264,10 +279,42 @@ namespace ArduinoCsCompiler
                 }
                 catch (Exception x)
                 {
-                    Logger.LogError($"Code execution caused an exception of type {x.GetType().FullName} on the microcontroller.");
-                    Logger.LogError(x.Message);
-                    Abort();
+                    // Check whether the source of the exception is the compiler itself or really the remote code
+                    if (x.StackTrace != null && x.StackTrace.Contains(nameof(ArduinoTask.GetMethodResults)))
+                    {
+                        Logger.LogError($"Code execution caused an exception of type {x.GetType().FullName} on the microcontroller.");
+                        Logger.LogError(x.Message);
+                        Abort();
+                    }
+                    else
+                    {
+                        Logger.LogError($"Internal error in compiler: {x.Message}");
+                        Logger.LogError(x.ToString());
+                        Abort();
+                    }
                 }
+            }
+            else
+            {
+                WriteTokenMap(set); // If we don't load, do this anyway
+            }
+        }
+
+        private void WriteTokenMap(ExecutionSet set)
+        {
+            if (_compiler == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(CommandLineOptions.TokenMapFile))
+            {
+                if (!_compiler.QueryBoardCapabilities(true, out var caps))
+                {
+                    caps = new IlCapabilities(); // Illegal, but that should be obvious to anyone
+                }
+
+                set.WriteMapFile(CommandLineOptions.TokenMapFile, caps);
             }
         }
 

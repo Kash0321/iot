@@ -1,18 +1,19 @@
-<!-- markdownlint-disable -->
+# .NET IoT Libraries
+
 [![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/dotnet/iot)
 [![Discord](https://img.shields.io/discord/755370044946513932?label=Discord)](https://discord.gg/kqWhBbj)
 
-# .NET IoT Libraries
-
 .NET can be used to build applications for [IoT](https://en.wikipedia.org/wiki/Internet_of_things) devices and scenarios. IoT applications typically interact with sensors, displays and input devices that require the use of [GPIO pins](https://en.wikipedia.org/wiki/General-purpose_input/output), serial ports or similar hardware.
 
-> **IMPORTANT**: This is the GitHub repo for the libraries. You might want to start with our [official documentation](https://docs.microsoft.com/dotnet/iot/).
+> [!IMPORTANT]
+> This is the GitHub repo for the libraries. You might want to start with our [official documentation](https://docs.microsoft.com/dotnet/iot/).
 
 This repository contains the [System.Device.Gpio](https://www.nuget.org/packages/System.Device.Gpio) library and implementations for various boards like [Raspberry Pi](https://www.raspberrypi.org/) and [Hummingboard](https://www.solid-run.com/nxp-family/hummingboard/).
 
 The repository also contains [Iot.Device.Bindings](https://www.nuget.org/packages/Iot.Device.Bindings), a growing set of community-maintained [device bindings](src/devices/README.md) for IoT components.
 
-> **NOTE**: This repository is still in experimental stage and all APIs are subject to changes.
+> [!NOTE]
+> This repository is still in experimental stage and all APIs are subject to changes.
 
 ## Hardware requirements
 
@@ -26,25 +27,37 @@ The sample projects target the latest stable .NET Version. This applies to the s
 
 ## How to Install
 
-You can install the latest daily pre-release build of the .NET System.Device.Gpio and Iot.Device.Bindings NuGet packages from the Azure artifacts feed.
-  
-### NuGet.exe
+From Visual Studio, you can just add a nuget by searching for `System.Device.Gpio` and `Iot.Device.Bindings`.
+
+### Nightly Builds
+
+You can also install the latest nightly builds of the .NET `System.Device.Gpio`, `Iot.Device.Bindings`, and `Iot.Device.Bindings.SkiaSharpAdapter` NuGet packages. These are automatically published from the latest commits to the main branch.
+
+#### Azure DevOps Feed (No Authentication Required)
+
+Add the nightly feed to your project:
 
 ```shell
-nuget install System.Device.Gpio -PreRelease -Source https://pkgs.dev.azure.com/dotnet/IoT/_packaging/nightly_iot_builds/nuget/v3/index.json
-nuget install Iot.Device.Bindings -PreRelease -Source https://pkgs.dev.azure.com/dotnet/IoT/_packaging/nightly_iot_builds/nuget/v3/index.json
+# Add the Azure DevOps nightly feed (no authentication required)
+dotnet nuget add source --name dotnet-iot-nightly "https://pkgs.dev.azure.com/dotnet/IoT/_packaging/nightly_iot_builds/nuget/v3/index.json"
+
+# Install packages
+dotnet add package System.Device.Gpio --source dotnet-iot-nightly --prerelease
+dotnet add package Iot.Device.Bindings --source dotnet-iot-nightly --prerelease
+dotnet add package Iot.Device.Bindings.SkiaSharpAdapter --source dotnet-iot-nightly --prerelease
+```
+
+Or add to your `NuGet.config`:
+
+```xml
+<packageSources>
+  <add key="dotnet-iot-nightly" value="https://pkgs.dev.azure.com/dotnet/IoT/_packaging/nightly_iot_builds/nuget/v3/index.json" />
+</packageSources>
 ```
 
 ### Official Build Status
 
 [![Build Status](https://dev.azure.com/dotnet/IoT/_apis/build/status/dotnet.iot?branchName=main)](https://dev.azure.com/dotnet/IoT/_build/latest?definitionId=179&branchName=main)
-
-### .NET CLI
-
-```shell
-dotnet add package System.Device.Gpio --source https://pkgs.dev.azure.com/dotnet/IoT/_packaging/nightly_iot_builds/nuget/v3/index.json
-dotnet add package Iot.Device.Bindings --source https://pkgs.dev.azure.com/dotnet/IoT/_packaging/nightly_iot_builds/nuget/v3/index.json
-```
 
 ## Contributing
 
@@ -86,7 +99,7 @@ Once you have selected the right branch, you can browse the repository. The main
 ## Community
 
 This project has adopted the code of conduct defined by the [Contributor Covenant](https://contributor-covenant.org/)
-to clarify expected behavior in our community. For more information, see the [.NET Foundation Code of Conduct](https://www.dotnetfoundation.org/code-of-conduct).
+to clarify expected behavior in our community. For more information, see the [.NET Foundation Code of Conduct](https://dotnetfoundation.org/code-of-conduct).
 
 ## License
 

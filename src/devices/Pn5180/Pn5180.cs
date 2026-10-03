@@ -13,6 +13,7 @@ using System.Threading;
 using System.Diagnostics.CodeAnalysis;
 using Iot.Device.Card;
 using Iot.Device.Card.Mifare;
+using Iot.Device.Card.Icode;
 using Iot.Device.Common;
 using Iot.Device.Rfid;
 using Microsoft.Extensions.Logging;
@@ -54,6 +55,19 @@ namespace Iot.Device.Pn5180
         /// </summary>
         public const SpiMode DefaultSpiMode = System.Device.Spi.SpiMode.Mode0;
 
+        /// <inheritdoc/>
+        public override uint MaximumReadSize => 508;
+
+        /// <inheritdoc/>
+        public override uint MaximumWriteSize => 260;
+
+        /// <summary>
+        /// The set of NFC protocols that are supported by this transceiver.
+        /// </summary>
+        public const NfcProtocol SupportedProtocols =
+            NfcProtocol.Iso14443_3 | NfcProtocol.Iso14443_4 | NfcProtocol.Mifare |
+            NfcProtocol.JisX6319_4 | NfcProtocol.Jewel | NfcProtocol.Iso15693;
+
         /// <summary>
         /// Create a PN5180 RFID/NFC reader
         /// </summary>
@@ -77,7 +91,7 @@ namespace Iot.Device.Pn5180
             _logger = this.GetCurrentClassLogger();
             _logger.LogDebug($"Opening PN5180, pin busy: {pinBusy}, pin NSS: {pinNss}");
             _spiDevice = spiDevice ?? throw new ArgumentNullException(nameof(spiDevice));
-            _gpioController = gpioController ?? new GpioController(PinNumberingScheme.Logical);
+            _gpioController = gpioController ?? new GpioController();
             _shouldDispose = shouldDispose || gpioController is null;
             _pinBusy = pinBusy;
             _pinNss = pinNss;
@@ -109,7 +123,7 @@ namespace Iot.Device.Pn5180
         #region EEPROM
 
         /// <summary>
-        /// Get the Product, Firmware and EEPROM versions of the PN8150
+        /// Get the Product, Firmware and EEPROM versions of the PN5180
         /// </summary>
         /// <returns>A tuple with the Product, Firmware and EEPROM versions</returns>
         public (Version? Product, Version? Firmware, Version? Eeprom) GetVersions()
@@ -406,19 +420,42 @@ namespace Iot.Device.Pn5180
         }
 
         /// <inheritdoc/>
-        public override int Transceive(byte targetNumber, ReadOnlySpan<byte> dataToSend, Span<byte> dataFromCard)
+        public override int Transceive(byte targetNumber, ReadOnlySpan<byte> dataToSend, Span<byte> dataFromCard, NfcProtocol protocol)
         {
-            // Check if we have a Mifare Card authentication request
-            // Only valid for Type A card so with a target number equal to 0
-            if (((targetNumber == 0) && ((dataToSend[0] == (byte)MifareCardCommand.AuthenticationA) || (dataToSend[0] == (byte)MifareCardCommand.AuthenticationB))) && (dataFromCard.Length == 0))
+            if (protocol == NfcProtocol.Mifare)
             {
-                var ret = MifareAuthenticate(dataToSend.Slice(2, 6).ToArray(), (MifareCardCommand)dataToSend[0], dataToSend[1], dataToSend.Slice(8).ToArray());
-                return ret ? 0 : -1;
+                // Check if we have a Mifare Card authentication request or 2-step write (special handling)
+                switch ((MifareCardCommand)dataToSend[0])
+                {
+                    case MifareCardCommand.AuthenticationA:
+                    case MifareCardCommand.AuthenticationB:
+                        var ret = MifareAuthenticate(dataToSend.Slice(2, 6).ToArray(), (MifareCardCommand)dataToSend[0], dataToSend[1], dataToSend.Slice(8).ToArray());
+                        return ret ? 0 : -1;
+
+                    case MifareCardCommand.Incrementation:
+                    case MifareCardCommand.Decrementation:
+                    case MifareCardCommand.Restore:
+                    case MifareCardCommand.Write16Bytes:
+                        return TwoStepsWrite16IncDecRestore(dataToSend);
+
+                    default:
+                        return TransceiveBuffer(dataToSend, dataFromCard);
+                }
             }
-            else
+            else if (protocol == NfcProtocol.Iso15693)
             {
-                return TransceiveClassic(targetNumber, dataToSend, dataFromCard);
+                var ret = SendDataToCard(dataToSend.ToArray());
+                if (!ret)
+                {
+                    return -1;
+                }
+
+                // ISO/IEC 15693-3:2001 page 25
+                // waiting time:(302μs) * number of bytes + eof(320.9μs) + 20ms
+                return ReadWithTimeout(dataFromCard, 1 + dataToSend.Length * 3 / 10 + 20);
             }
+
+            return TransceiveClassic(targetNumber, dataToSend, dataFromCard);
         }
 
         /// <inheritdoc/>
@@ -444,6 +481,17 @@ namespace Iot.Device.Pn5180
                 var ret = SelectCardTypeB(card.Card);
                 return ret;
             }
+        }
+
+        private int TwoStepsWrite16IncDecRestore(ReadOnlySpan<byte> dataToSend)
+        {
+            if (TransceiveBuffer(dataToSend.Slice(0, 2), Span<byte>.Empty) < 0)
+            {
+                _logger.LogWarning($"{nameof(TwoStepsWrite16IncDecRestore)} - Error {(MifareCardCommand)dataToSend[0]}");
+                return -1;
+            }
+
+            return TransceiveBuffer(dataToSend.Slice(2), Span<byte>.Empty);
         }
 
         private int TransceiveClassic(byte targetNumber, ReadOnlySpan<byte> dataToSend, Span<byte> dataFromCard)
@@ -634,8 +682,9 @@ namespace Iot.Device.Pn5180
                 return -1;
             }
 
-            // 10 etu needed for 1 byte, 1 etu = 9.4 µs, so about 100 µs are needed to transfer 1 character
-            return ReadWithTimeout(dataFromCard, dataFromCard.Length / 100);
+            // 10 etu needed for 1 byte, 1 etu = 9.4 µs, so about 100 µs (0.1ms) are needed per byte
+            // add a couple of milliseconds for general overhead to avoid timing out too soon
+            return ReadWithTimeout(dataFromCard, 2 + (dataFromCard.Length + 9) / 10);
         }
 
         private bool SendRBlock(byte targetNumber, RBlock ack, int blockNumber)
@@ -1429,6 +1478,106 @@ namespace Iot.Device.Pn5180
             return true;
         }
 
+        /// <summary>
+        /// Listen to 15693 cards with 16 slots
+        /// </summary>
+        /// <param name="transmitter">The transmitter configuration, should be compatible with 15693 card</param>
+        /// <param name="receiver">The receiver configuration, should be compatible with 15693 card</param>
+        /// <param name="cards">The 15693 cards once detected</param>
+        /// <param name="timeoutPollingMilliseconds">The time to poll the card in milliseconds. Card detection will stop once the detection time will be over</param>
+        /// <returns>True if a 15693 card has been detected</returns>
+        public bool ListenToCardIso15693(TransmitterRadioFrequencyConfiguration transmitter, ReceiverRadioFrequencyConfiguration receiver,
+#if NET5_0_OR_GREATER
+        [NotNullWhen(true)]
+#endif
+        out IList<Data26_53kbps>? cards, int timeoutPollingMilliseconds)
+        {
+            cards = new List<Data26_53kbps>();
+            var ret = LoadRadioFrequencyConfiguration(transmitter, receiver);
+            // Switch on the radio frequence field and check it
+            ret &= SetRadioFrequency(true);
+
+            Span<byte> inventoryResponse = stackalloc byte[10];
+            Span<byte> dsfid = stackalloc byte[1];
+            Span<byte> uid = stackalloc byte[8];
+
+            int numBytes = 0;
+
+            DateTime dtTimeout = DateTime.Now.AddMilliseconds(timeoutPollingMilliseconds);
+
+            try
+            {
+                // Clears all interrupt
+                SpiWriteRegister(Command.WRITE_REGISTER, Register.IRQ_CLEAR, new byte[] { 0xFF, 0xFF, 0x0F, 0x00 });
+                // Sets the PN5180 into IDLE state
+                SpiWriteRegister(Command.WRITE_REGISTER_AND_MASK, Register.SYSTEM_CONFIG, new byte[] { 0xF8, 0xFF, 0xFF, 0xFF });
+                // Activates TRANSCEIVE routine
+                SpiWriteRegister(Command.WRITE_REGISTER_OR_MASK, Register.SYSTEM_CONFIG, new byte[] { 0x03, 0x00, 0x00, 0x00 });
+                // Sends an inventory command with 16 slots
+                ret = SendDataToCard(new byte[] { 0x06, 0x01, 0x00 });
+                if (dtTimeout < DateTime.Now)
+                {
+                    return false;
+                }
+
+                for (byte slotCounter = 0; slotCounter < 16; slotCounter++)
+                {
+                    (numBytes, _) = GetNumberOfBytesReceivedAndValidBits();
+                    if (numBytes > 0)
+                    {
+                        ret &= ReadDataFromCard(inventoryResponse, inventoryResponse.Length);
+                        if (ret)
+                        {
+                            cards.Add(new Data26_53kbps(slotCounter, 0, 0, inventoryResponse[1], inventoryResponse.Slice(2, 8).ToArray()));
+                        }
+                    }
+
+                    // Send only EOF (End of Frame) without data at the next RF communication
+                    SpiWriteRegister(Command.WRITE_REGISTER_AND_MASK, Register.TX_CONFIG, new byte[] { 0x3F, 0xFB, 0xFF, 0xFF });
+                    // Sets the PN5180 into IDLE state
+                    SpiWriteRegister(Command.WRITE_REGISTER_AND_MASK, Register.SYSTEM_CONFIG, new byte[] { 0xF8, 0xFF, 0xFF, 0xFF });
+                    // Activates TRANSCEIVE routine
+                    SpiWriteRegister(Command.WRITE_REGISTER_OR_MASK, Register.SYSTEM_CONFIG, new byte[] { 0x03, 0x00, 0x00, 0x00 });
+                    // Clears the interrupt register IRQ_STATUS
+                    SpiWriteRegister(Command.WRITE_REGISTER, Register.IRQ_CLEAR, new byte[] { 0xFF, 0xFF, 0x0F, 0x00 });
+                    // Send EOF
+                    SendDataToCard(new Span<byte> { });
+                }
+
+                if (cards.Count > 0)
+                {
+                    return true;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+            catch (TimeoutException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// reset PN5180 RF Configuration and some Register
+        /// </summary>
+        /// <param name="transmitter">The transmitter configuration</param>
+        /// <param name="receiver">The receiver configuration</param>
+        /// <returns></returns>
+        public bool ResetPN5180Configuration(TransmitterRadioFrequencyConfiguration transmitter, ReceiverRadioFrequencyConfiguration receiver)
+        {
+            var ret = LoadRadioFrequencyConfiguration(transmitter, receiver);
+            // Switch on the radio frequence field and check it
+            ret &= SetRadioFrequency(true);
+            // Clears all interrupt
+            SpiWriteRegister(Command.WRITE_REGISTER, Register.IRQ_CLEAR, new byte[] { 0xFF, 0xFF, 0x0F, 0x00 });
+            // Sets the PN5180 into IDLE state
+            SpiWriteRegister(Command.WRITE_REGISTER_AND_MASK, Register.SYSTEM_CONFIG, new byte[] { 0xF8, 0xFF, 0xFF, 0xFF });
+            // Activates TRANSCEIVE routine
+            SpiWriteRegister(Command.WRITE_REGISTER_OR_MASK, Register.SYSTEM_CONFIG, new byte[] { 0x03, 0x00, 0x00, 0x00 });
+            return ret;
+        }
         #endregion
 
         #region SPI primitives
@@ -1476,13 +1625,13 @@ namespace Iot.Device.Pn5180
             // 3.Wait until BUSY is high
             // 4.Deassert NSS
             // 5.Wait until BUSY is low
-            // Wait for the PN8150 to be ready
+            // Wait for the PN5180 to be ready
             Stopwatch stopwatch = Stopwatch.StartNew();
             while (_gpioController.Read(_pinBusy) == PinValue.High)
             {
                 if (stopwatch.Elapsed.TotalMilliseconds >= TimeoutWaitingMilliseconds)
                 {
-                    throw new TimeoutException($"PN8150 not ready to write");
+                    throw new TimeoutException($"PN5180 not ready to write");
                 }
             }
 
@@ -1495,7 +1644,7 @@ namespace Iot.Device.Pn5180
             {
                 if (stopwatch.Elapsed.TotalMilliseconds >= TimeoutWaitingMilliseconds)
                 {
-                    throw new TimeoutException($"PN8150 is still busy after writting");
+                    throw new TimeoutException($"PN5180 is still busy after writting");
                 }
             }
 
@@ -1515,13 +1664,13 @@ namespace Iot.Device.Pn5180
             // 4.Deassert NSS
             // 5.Wait until BUSY is low
 
-            // Wait for the PN8150 to be ready
+            // Wait for the PN5180 to be ready
             Stopwatch stopwatch = Stopwatch.StartNew();
             while (_gpioController.Read(_pinBusy) == PinValue.High)
             {
                 if (stopwatch.Elapsed.TotalMilliseconds >= TimeoutWaitingMilliseconds)
                 {
-                    throw new TimeoutException($"PN8150 not ready to write");
+                    throw new TimeoutException($"PN5180 not ready to write");
                 }
             }
 
@@ -1543,7 +1692,7 @@ namespace Iot.Device.Pn5180
             {
                 if (stopwatch.Elapsed.TotalMilliseconds >= TimeoutWaitingMilliseconds)
                 {
-                    throw new TimeoutException($"PN8150 is still busy after reading");
+                    throw new TimeoutException($"PN5180 is still busy after reading");
                 }
             }
 

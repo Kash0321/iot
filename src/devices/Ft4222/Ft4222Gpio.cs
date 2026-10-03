@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 using System.Device.Gpio;
 using System.IO;
 using System.Linq;
@@ -18,6 +19,7 @@ namespace Iot.Device.Ft4222
     {
         private const int PinCountConst = 4;
 
+        private readonly Dictionary<int, PinValue> _pinValues = new Dictionary<int, PinValue>();
         private SafeFtHandle _ftHandle;
         private GpioPinMode[] _gpioDirections = new GpioPinMode[PinCountConst];
         private GpioTrigger[] _gpioTriggers = new GpioTrigger[PinCountConst];
@@ -110,10 +112,8 @@ namespace Iot.Device.Ft4222
         /// <inheritdoc/>
         protected override void ClosePin(int pinNumber)
         {
+            _pinValues.Remove(pinNumber);
         }
-
-        /// <inheritdoc/>
-        protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => pinNumber;
 
         /// <inheritdoc/>
         protected override PinMode GetPinMode(int pinNumber) => _gpioDirections[pinNumber] == GpioPinMode.Input ? PinMode.Input : PinMode.Output;
@@ -124,6 +124,7 @@ namespace Iot.Device.Ft4222
         /// <inheritdoc/>
         protected override void OpenPin(int pinNumber)
         {
+            _pinValues.TryAdd(pinNumber, PinValue.Low);
         }
 
         /// <inheritdoc/>
@@ -136,8 +137,12 @@ namespace Iot.Device.Ft4222
                 throw new IOException($"{nameof(Read)}: failed to write GPIO, status: {status}");
             }
 
-            return pinVal == GpioPinValue.High ? PinValue.High : PinValue.Low;
+            _pinValues[pinNumber] = pinVal == GpioPinValue.High ? PinValue.High : PinValue.Low;
+            return _pinValues[pinNumber];
         }
+
+        /// <inheritdoc/>
+        protected override void Toggle(int pinNumber) => Write(pinNumber, !_pinValues[pinNumber]);
 
         /// <inheritdoc/>
         protected override void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
@@ -265,12 +270,15 @@ namespace Iot.Device.Ft4222
             {
                 throw new IOException($"{nameof(Write)}: failed to write GPIO, status: {status}");
             }
+
+            _pinValues[pinNumber] = value;
         }
 
         /// <inheritdoc/>
         protected override void Dispose(bool disposing)
         {
             _ftHandle.Dispose();
+            _pinValues.Clear();
             base.Dispose(disposing);
         }
     }

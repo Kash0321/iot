@@ -60,11 +60,7 @@ public abstract partial class PwmChannel : IDisposable
     {
         if (Environment.OSVersion.Platform == PlatformID.Win32NT)
         {
-            return CreateWindows10PwmChannel(
-                chip,
-                channel,
-                frequency,
-                dutyCyclePercentage);
+            throw new PlatformNotSupportedException();
         }
         else if (IsBeagleBoneKernel())
         {
@@ -99,5 +95,18 @@ public abstract partial class PwmChannel : IDisposable
             // at the cost of some potentially weird errors if it is actually a beagle bone kernel.
             return false;
         }
+    }
+
+    /// <summary>
+    /// Query information about a component and it's children.
+    /// </summary>
+    /// <returns>A tree of <see cref="ComponentInformation"/> instances.</returns>
+    /// <remarks>
+    /// This method is currently reserved for debugging purposes. Its behavior its and signature are subject to change.
+    /// </remarks>
+    public virtual ComponentInformation QueryComponentInformation()
+    {
+        // We expect the description to be overriden, but to avoid adding new abstract members, we provide a default implementation
+        return new ComponentInformation(this, "PWM Device");
     }
 }

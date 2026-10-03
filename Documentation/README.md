@@ -7,7 +7,10 @@ See the following resources to get started.
 This repository mainly contains two different components:
 
 1. **System.Device.Gpio** library and tests which is the main library that has the implementation for protocols such as: GPIO, SPI, I2C, PWM. This library is fully supported by the dotnet team since it has the same level of support that dotnet/corefx does. All the code for the library lives under src/System.Device.Gpio. This library targets .NET Standard 2.0, and will work on both Windows and Linux. It's implementation consists of just IL code, so that means that it is supported across different platforms. In order to add new API to this library, an API Proposal would have to be submitted and approved first. [Here](https://github.com/dotnet/iot/issues/122) is an example of a how a good API proposal should look like.
-1. **Iot.Device.Bindings** device bindings library. This is a collection of types which work as wrappers (or bindings) for devices and sensors which are able to talk to a microcontroller unit (or MCU like a Raspberry Pi for example) using the protocols supported by System.Device.Gpio. For example: [BME280](/src/devices/Bmxx80/README.md) is a temperature sensor which uses SPI and I2C in order to communicate with a MCU and is able to report the current temperature. Because the process of how to compute the temperature from the data is not trivial, we have a `Bme280` class which exposes friendly methods like `ReadTemperature()` which will internally use either SPI or I2C to get the current temperature value. In order to start adding a new binding, check out our [guide on how to contribute a new binding](/tools/templates/DeviceBindingTemplate/README.md). It is worth noting that even though all device bindings will be built and packaged as a single library (Iot.Device.Bindings), the code is split under src/devices on individual projects for easier development of a single binding and developer inner-loop.
+Doing a PR on this part of the project may result in API review, higher exigence for the code quality and longer discussions. You need to be ready for this.
+1. **Iot.Device.Bindings** device bindings library. This is a collection of types which work as wrappers (or bindings) for devices and sensors which are able to talk to a microcontroller unit (or MCU like a Raspberry Pi for example) using the protocols supported by System.Device.Gpio. For example: [BME280](../src/devices/Bmxx80/README.md) is a temperature sensor which uses SPI and I2C in order to communicate with a MCU and is able to report the current temperature. Because the process of how to compute the temperature from the data is not trivial, we have a `Bme280` class which exposes friendly methods like `ReadTemperature()` which will internally use either SPI or I2C to get the current temperature value. In order to start adding a new binding, check out our [guide on how to contribute a new binding](../tools/templates/DeviceBindingTemplate/README.md). It is worth noting that even though all device bindings will be built and packaged as a single library (Iot.Device.Bindings), the code is split under src/devices on individual projects for easier development of a single binding and developer inner-loop.
+
+While contributing, you should read the [coding guidelines section](https://github.com/dotnet/runtime/tree/main/docs#coding-guidelines), the [device conventions](./Devices-conventions.md) and also how to [best contribute to a binding](../src/devices/README.md#contributing-a-binding).
 
 ## System.Device.* APIs
 
@@ -45,14 +48,15 @@ This repository mainly contains two different components:
 
 * [Configuring Remote Debugging from Dev machine to Raspberry Pi on ARM](https://www.hanselman.com/blog/RemoteDebuggingWithVSCodeOnWindowsToARaspberryPiUsingNETCoreOnARM.aspx)
 * [.NET Core Documentation](https://docs.microsoft.com/dotnet/)
-* [Install .NET Core on Raspberry Pi](https://github.com/dotnet/core/blob/master/samples/RaspberryPiInstructions.md)
+* [Install .NET on Raspberry Pi](https://learn.microsoft.com/en-us/dotnet/core/install/linux-debian)
+* [Deploy .NET apps on ARM single-board computers](https://learn.microsoft.com/en-us/dotnet/iot/deployment)
 * [.NET Core ARM64 Status](https://github.com/dotnet/announcements/issues/82)
 * [.NET Core Docker Samples](https://github.com/dotnet/dotnet-docker/tree/master/samples)
 * [How to Prepare a Publish Profile](How-to-Deploy-an-IoT-App.md)
 
 ## Development Boards
 
-> **NOTE**: It has been verified that .NET Core will work on the following development boards.  However, there has only been limited testing so far.  It is recommended you experiment with the Raspberry Pi 3 and HummingBoard for now.
+> **NOTE**: It has been verified that .NET Core will work on the following development boards.  However, there has only been limited testing so far.  It is recommended you experiment with a Raspberry Pi 3+.
 
 ### Raspberry Pi
 
@@ -68,6 +72,7 @@ This repository mainly contains two different components:
 
 * [Enable SPI on Raspberry Pi](./raspi-spi.md)
 * [Enable I2C on Raspberry Pi](./raspi-i2c.md)
+* [Control GPIO pins within rootless Docker container on Raspberry Pi](./raspi-Docker-GPIO.md)
 * [Enable Hardware PWM on Raspberry Pi](./raspi-pwm.md)
 * [Enable Headless Raspberry Pi](https://hackernoon.com/raspberry-pi-headless-install-462ccabd75d0)
 * [Docker Access to Raspberry Pi GPIO Pins](https://stackoverflow.com/questions/30059784/docker-access-to-raspberry-pi-gpio-pins)
@@ -76,17 +81,6 @@ This repository mainly contains two different components:
 #### Product details for Raspberry Pi
 
 * [Raspberry Pi 3 Model B+](https://www.raspberrypi.org/products/raspberry-pi-3-model-b-plus/)
-
-### HummingBoard
-
-#### General information for HummingBoard
-
-* [SolidRun Website](https://www.solid-run.com/)
-* [SolidRun GitHub Website](https://github.com/SolidRun)
-
-#### Product details for HummingBoard
-
-* [HummingBoard](https://www.solid-run.com/nxp-family/hummingboard/)
 
 ### BeagleBoard
 
@@ -115,6 +109,14 @@ This repository mainly contains two different components:
 
 * [PINE A64-LTS](https://www.pine64.org/?page_id=46823)
 
+## Platforms
+
+### Linux
+
+#### GPIO
+
+* [Use libgpiod to control GPIOs on Linux](./gpio-linux-libgpiod.md)
+
 ## Maker Resources
 
 ### Prototyping
@@ -134,7 +136,7 @@ This repository mainly contains two different components:
 
 ### Social
 
-* [Hackaday.io](https://hackaday.io/)
+* [Hackaday.io](https://hackaday.io)
 * [hackster.io](https://www.hackster.io/)
 * [instructables](https://www.instructables.com/)
 

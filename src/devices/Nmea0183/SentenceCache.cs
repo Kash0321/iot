@@ -6,30 +6,44 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using Iot.Device.Common;
 using Iot.Device.Nmea0183.Sentences;
+using Microsoft.Extensions.Logging;
 using UnitsNet;
 
 namespace Iot.Device.Nmea0183
 {
     /// <summary>
-    /// Caches the last sentence(s) of each type and so provides a way of asking for the current position without waiting for the next message
+    /// Caches the last sentence(s) of each type for later retrieval.
+    /// This is a helper class for <see cref="AutopilotController"/> and <see cref="PositionProvider"/>. Use <see cref="PositionProvider"/> to query the position from
+    /// the most appropriate messages.
+    /// It internally keeps two kinds of lists: The last sentence of each type and the last sentence of each type _by source_.
     /// </summary>
     public sealed class SentenceCache : IDisposable
     {
         private readonly NmeaSinkAndSource _source;
         private readonly object _lock;
-        private Dictionary<SentenceId, NmeaSentence> _sentences;
+
+        private readonly Dictionary<int, NmeaSentence> _dinData;
+        private readonly Dictionary<SentenceId, NmeaSentence> _sentences;
+        private readonly Dictionary<String, Dictionary<SentenceId, NmeaSentence>> _sentencesBySource;
+        private readonly ILogger _logger;
+
         private Queue<RoutePart> _lastRouteSentences;
         private Dictionary<string, Waypoint> _wayPoints;
         private Queue<SatellitesInView> _lastSatelliteInfos;
+        private Dictionary<string, TransducerDataSet> _xdrData;
+        private TalkerId _magneticDeviationProvider = TalkerId.Any;
 
         private SentenceId[] _groupSentences = new SentenceId[]
         {
-            // These sentences come in groups
+            // These sentences come in groups or carry multiple different data sets
             new SentenceId("GSV"),
             new SentenceId("RTE"),
             new SentenceId("WPL"),
+            new SentenceId("DIN"),
+            new SentenceId("XDR"),
         };
 
         /// <summary>
@@ -41,11 +55,16 @@ namespace Iot.Device.Nmea0183
             _source = source;
             _lock = new object();
             _sentences = new Dictionary<SentenceId, NmeaSentence>();
+            _sentencesBySource = new Dictionary<String, Dictionary<SentenceId, NmeaSentence>>();
             _lastRouteSentences = new Queue<RoutePart>();
             _lastSatelliteInfos = new Queue<SatellitesInView>();
             _wayPoints = new Dictionary<string, Waypoint>();
+            _xdrData = new Dictionary<string, TransducerDataSet>();
+            _dinData = new Dictionary<int, NmeaSentence>();
             StoreRawSentences = false;
+            _logger = this.GetCurrentClassLogger();
             _source.OnNewSequence += OnNewSequence;
+            MaxDataAge = TimeSpan.FromSeconds(30);
         }
 
         /// <summary>
@@ -59,6 +78,24 @@ namespace Iot.Device.Nmea0183
         }
 
         /// <summary>
+        /// Maximum age after which any message is discarded. Default 30 Seconds
+        /// </summary>
+        public TimeSpan MaxDataAge
+        {
+            get;
+            set;
+        }
+
+        /// <summary>
+        /// The magnetic variation at the current location. Positive when easterly, negative when westerly.
+        /// </summary>
+        public Angle? MagneticVariation
+        {
+            get;
+            private set;
+        }
+
+        /// <summary>
         /// Clears the cache
         /// </summary>
         public void Clear()
@@ -69,111 +106,10 @@ namespace Iot.Device.Nmea0183
                 _lastRouteSentences.Clear();
                 _wayPoints.Clear();
                 _lastSatelliteInfos.Clear();
+                _sentencesBySource.Clear();
+                MagneticVariation = null;
+                _magneticDeviationProvider = TalkerId.Any;
             }
-        }
-
-        /// <summary>
-        /// Get the current position from the latest message containing any of the relevant data parts. This does not extrapolate the position
-        /// if the last received message is old
-        /// </summary>
-        /// <param name="position">Current position</param>
-        /// <param name="track">Track (course over ground)</param>
-        /// <param name="sog">Speed over ground</param>
-        /// <param name="heading">Vessel Heading</param>
-        /// <returns>True if a valid position is returned</returns>
-        public bool TryGetCurrentPosition(out GeographicPosition? position, out Angle track, out Speed sog, out Angle? heading)
-        {
-            return TryGetCurrentPosition(out position, false, out track, out sog, out heading);
-        }
-
-        /// <summary>
-        /// Get the current position from the latest message containing any of the relevant data parts.
-        /// If <paramref name="extrapolate"></paramref> is true, the speed and direction are used to extrapolate the position (many older
-        /// GNSS receivers only deliver the position at 1Hz or less)
-        /// </summary>
-        /// <param name="position">Current position</param>
-        /// <param name="extrapolate">True to extrapolate the current position using speed and track</param>
-        /// <param name="track">Track (course over ground)</param>
-        /// <param name="sog">Speed over ground</param>
-        /// <param name="heading">Vessel Heading</param>
-        /// <returns>True if a valid position is returned</returns>
-        public bool TryGetCurrentPosition(out GeographicPosition? position, bool extrapolate, out Angle track, out Speed sog, out Angle? heading)
-        {
-            // Try to get any of the position messages
-            var gll = (PositionFastUpdate?)GetLastSentence(PositionFastUpdate.Id);
-            var gga = (GlobalPositioningSystemFixData?)GetLastSentence(GlobalPositioningSystemFixData.Id);
-            var rmc = (RecommendedMinimumNavigationInformation?)GetLastSentence(RecommendedMinimumNavigationInformation.Id);
-            var vtg = (TrackMadeGood?)GetLastSentence(TrackMadeGood.Id);
-            var hdt = (HeadingTrue?)GetLastSentence(HeadingTrue.Id);
-            TimeSpan age;
-
-            List<(GeographicPosition, TimeSpan)> orderablePositions = new List<(GeographicPosition, TimeSpan)>();
-            if (gll != null && gll.Position != null)
-            {
-                orderablePositions.Add((gll.Position, gll.Age));
-            }
-
-            if (gga != null && gga.Valid)
-            {
-                orderablePositions.Add((gga.Position, gga.Age));
-            }
-
-            if (rmc != null && rmc.Valid)
-            {
-                orderablePositions.Add((rmc.Position, rmc.Age));
-            }
-
-            if (orderablePositions.Count == 0)
-            {
-                // No valid positions received
-                position = null;
-                track = Angle.Zero;
-                sog = Speed.Zero;
-                heading = null;
-                return false;
-            }
-
-            (position, age) = orderablePositions.OrderBy(x => x.Item2).Select(x => (x.Item1, x.Item2)).First();
-
-            if (gga != null && gga.EllipsoidAltitude.HasValue)
-            {
-                // If we had seen a gga message, use its height, regardless of which other message provided the position
-                position = new GeographicPosition(position.Latitude, position.Longitude, gga.EllipsoidAltitude.Value);
-            }
-
-            if (rmc != null)
-            {
-                sog = rmc.SpeedOverGround;
-                track = rmc.TrackMadeGoodInDegreesTrue;
-            }
-            else if (vtg != null)
-            {
-                sog = vtg.Speed;
-                track = vtg.CourseOverGroundTrue;
-            }
-            else
-            {
-                sog = Speed.Zero;
-                track = Angle.Zero;
-                heading = null;
-                return false;
-            }
-
-            if (hdt != null)
-            {
-                heading = hdt.Angle;
-            }
-            else
-            {
-                heading = null;
-            }
-
-            if (extrapolate)
-            {
-                position = GreatCircle.CalcCoords(position, track, sog * age);
-            }
-
-            return true;
         }
 
         /// <summary>
@@ -184,11 +120,40 @@ namespace Iot.Device.Nmea0183
         /// <returns>The last sentence of that type, or null.</returns>
         public NmeaSentence? GetLastSentence(SentenceId id)
         {
+            CleanOutdatedEntries();
             lock (_lock)
             {
                 if (_sentences.TryGetValue(id, out var sentence))
                 {
                     return sentence;
+                }
+
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Gets the last sentence with the given id from the given talker.
+        /// </summary>
+        /// <param name="source">Source to query</param>
+        /// <param name="id">Id to query</param>
+        /// <returns>The last sentence of that type and source, null if not found</returns>
+        public NmeaSentence? GetLastSentence(string? source, SentenceId id)
+        {
+            CleanOutdatedEntries();
+            if (source == null)
+            {
+                return GetLastSentence(id);
+            }
+
+            lock (_lock)
+            {
+                if (_sentencesBySource.TryGetValue(source, out var list))
+                {
+                    if (list.TryGetValue(id, out var sentence))
+                    {
+                        return sentence;
+                    }
                 }
 
                 return null;
@@ -203,10 +168,8 @@ namespace Iot.Device.Nmea0183
         /// <param name="sentence">Receives the sentence, if any was found</param>
         /// <returns>True on success, false if no such message was received</returns>
         public bool TryGetLastSentence<T>(SentenceId id,
-#if NET5_0_OR_GREATER
             [NotNullWhen(true)]
-#endif
-            out T sentence)
+            out T? sentence)
             where T : NmeaSentence
         {
             var s = GetLastSentence(id);
@@ -216,7 +179,7 @@ namespace Iot.Device.Nmea0183
                 return true;
             }
 
-            sentence = null!;
+            sentence = null;
             return false;
         }
 
@@ -229,6 +192,7 @@ namespace Iot.Device.Nmea0183
         /// <returns>The last sentence of that type, or null if none was received within the given timespan.</returns>
         public NmeaSentence? GetLastSentence(SentenceId id, TimeSpan maxAge)
         {
+            CleanOutdatedEntries();
             lock (_lock)
             {
                 if (_sentences.TryGetValue(id, out var sentence))
@@ -244,196 +208,18 @@ namespace Iot.Device.Nmea0183
         }
 
         /// <summary>
-        /// Returns the current route
+        /// Let's the cache remember this waypoint.
+        /// The method can be called multiple times to update a waypoint (e.g. new position with same name)
         /// </summary>
-        /// <param name="routeList">The list of points along the route</param>
-        /// <returns>The state of the route received</returns>
-        public AutopilotErrorState TryGetCurrentRoute(out List<RoutePoint> routeList)
+        /// <param name="wpt">The waypoint. Must have a valid name.</param>
+        public void AddWayPoint(Waypoint wpt)
         {
-            routeList = new List<RoutePoint>();
-            List<RoutePart>? segments = FindLatestCompleteRoute(out string routeName);
-            if (segments == null)
-            {
-                return AutopilotErrorState.NoRoute;
-            }
-
-            List<string> wpNames = new List<string>();
-            foreach (var segment in segments)
-            {
-                wpNames.AddRange(segment.WaypointNames);
-            }
-
-            // We've seen RTE messages, but no waypoints yet
-            if (wpNames.Count == 0)
-            {
-                return AutopilotErrorState.WaypointsWithoutPosition;
-            }
-
-            if (wpNames.GroupBy(x => x).Any(g => g.Count() > 1))
-            {
-                return AutopilotErrorState.RouteWithDuplicateWaypoints;
-            }
-
-            for (var index = 0; index < wpNames.Count; index++)
-            {
-                var name = wpNames[index];
-                GeographicPosition? position = null;
-                if (_wayPoints.TryGetValue(name, out var pt))
-                {
-                    position = pt.Position;
-                }
-                else
-                {
-                    // Incomplete route - need to wait for all wpt messages
-                    return AutopilotErrorState.WaypointsWithoutPosition;
-                }
-
-                RoutePoint rpt = new RoutePoint(routeName, index, wpNames.Count, name, position, null, null);
-                routeList.Add(rpt);
-            }
-
-            return AutopilotErrorState.RoutePresent;
-        }
-
-        private List<RoutePart>? FindLatestCompleteRoute(out string routeName)
-        {
-            List<RoutePart> routeSentences;
+            ArgumentNullException.ThrowIfNull(wpt);
+            ArgumentException.ThrowIfNullOrWhiteSpace(wpt.Name);
             lock (_lock)
             {
-                // Newest shall be first in list
-                routeSentences = _lastRouteSentences.ToList();
-                routeSentences.Reverse();
+                _wayPoints[wpt.Name] = wpt;
             }
-
-            if (routeSentences.Count == 0)
-            {
-                routeName = "No route";
-                return null;
-            }
-
-            routeName = string.Empty;
-            RoutePart?[]? elements = null;
-
-            // This is initially never 0 here
-            while (routeSentences.Count > 0)
-            {
-                // Last initial sequence, take this as the header for what we combine
-                var head = routeSentences.FirstOrDefault(x => x.Sequence == 1);
-                if (head == null)
-                {
-                    routeName = "No complete route";
-                    return null;
-                }
-
-                int numberOfSequences = head.TotalSequences;
-                routeName = head.RouteName;
-
-                elements = new RoutePart[numberOfSequences + 1]; // Use 1-based indexing
-                bool complete = false;
-                foreach (var sentence in routeSentences)
-                {
-                    if (sentence.RouteName == routeName && sentence.Sequence <= numberOfSequences)
-                    {
-                        // Iterate until we found one of each of the components of route
-                        elements[sentence.Sequence] = sentence;
-                        complete = true;
-                        for (int i = 1; i <= numberOfSequences; i++)
-                        {
-                            if (elements[i] == null)
-                            {
-                                complete = false;
-                            }
-                        }
-
-                        if (complete)
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                if (complete)
-                {
-                    break;
-                }
-
-                // The sentence with the first header we found was incomplete - try the next (we're possibly just changing the route)
-                routeSentences.RemoveRange(0, routeSentences.IndexOf(head) + 1);
-            }
-
-            List<RoutePart> ret = new List<RoutePart>();
-            if (elements != null)
-            {
-                for (var index = 1; index < elements.Length; index++)
-                {
-                    var elem = elements[index];
-                    if (elem == null)
-                    {
-                        // List is incomplete
-                        return null;
-                    }
-
-                    ret.Add(elem);
-                }
-            }
-
-            return ret.OrderBy(x => x.Sequence).ToList();
-        }
-
-        /// <summary>
-        /// Returns the list of satellites in view
-        /// </summary>
-        /// <param name="totalNumberOfSatellites">Total number of satellites reported.
-        /// This number might be larger than the number of elements in the list, as there might not be enough
-        /// slots to transfer the whole status for all satellites</param>
-        /// <returns></returns>
-        public List<SatelliteInfo> GetSatellitesInView(out int totalNumberOfSatellites)
-        {
-            int maxSats = 0;
-            List<SatellitesInView> sentences = new List<SatellitesInView>();
-            lock (_lock)
-            {
-                sentences = _lastSatelliteInfos.ToList();
-                sentences.Reverse();
-            }
-
-            List<SatellitesInView> filtered = new List<SatellitesInView>();
-            foreach (var s in sentences)
-            {
-                // We might be getting satellite status from more than one source
-                if (!filtered.Any(x => x.Sequence == s.Sequence && x.TalkerId == s.TalkerId))
-                {
-                    filtered.Add(s);
-                }
-
-                if (maxSats < s.TotalSatellites)
-                {
-                    maxSats = s.TotalSatellites;
-                }
-            }
-
-            var allsats = filtered.Select(x => x.Satellites);
-
-            List<SatelliteInfo> ret = new();
-            foreach (var list1 in allsats)
-            {
-                foreach (var s2 in list1)
-                {
-                    if (ret.All(x => x.Id != s2.Id))
-                    {
-                        ret.Add(s2);
-                    }
-                }
-            }
-
-            if (maxSats < ret.Count)
-            {
-                maxSats = ret.Count;
-            }
-
-            ret = ret.OrderBy(x => x.Id).ToList();
-            totalNumberOfSatellites = maxSats;
-            return ret;
         }
 
         private void OnNewSequence(NmeaSinkAndSource? source, NmeaSentence sentence)
@@ -449,14 +235,38 @@ namespace Iot.Device.Nmea0183
                 return;
             }
 
+            string sourceName;
+            if (source == null)
+            {
+                sourceName = MessageRouter.LocalMessageSource;
+                _logger.LogWarning($"Cache got message without source: {sentence.ToNmeaMessage()}");
+            }
+            else
+            {
+                sourceName = source.InterfaceName;
+            }
+
             lock (_lock)
             {
                 if (!_groupSentences.Contains(sentence.SentenceId))
                 {
                     // Standalone sequences. Only the last message needs to be kept
                     _sentences[sentence.SentenceId] = sentence;
+
+                    // We already own the lock to do that a bit more complex update.
+                    if (_sentencesBySource.TryGetValue(sourceName, out var dict))
+                    {
+                        dict[sentence.SentenceId] = sentence;
+                    }
+                    else
+                    {
+                        var d = new Dictionary<SentenceId, NmeaSentence>();
+                        d[sentence.SentenceId] = sentence;
+                        _sentencesBySource[sourceName] = d;
+                    }
                 }
-                else if (sentence.SentenceId == RoutePart.Id && (sentence is RoutePart rte))
+
+                if (sentence.SentenceId == RoutePart.Id && (sentence is RoutePart rte))
                 {
                     _lastRouteSentences.Enqueue(rte);
                     while (_lastRouteSentences.Count > 100)
@@ -479,6 +289,27 @@ namespace Iot.Device.Nmea0183
                         _lastSatelliteInfos.Dequeue();
                     }
                 }
+                else if (sentence.SentenceId == TransducerMeasurement.Id && (sentence is TransducerMeasurement xdr))
+                {
+                    foreach (var measurement in xdr.DataSets)
+                    {
+                        _xdrData[measurement.DataName] = measurement;
+                    }
+                }
+                else if (sentence.SentenceId == ProprietaryMessage.Id && (sentence is ProprietaryMessage din))
+                {
+                    _dinData[din.Identifier] = din;
+                }
+                else if (sentence.SentenceId == RecommendedMinimumNavigationInformation.Id && (sentence is RecommendedMinimumNavigationInformation rmc))
+                {
+                    // Once we received one such value, always use that provider. Otherwise we might get confused
+                    // by different sources with varying variance models.
+                    if (rmc.MagneticVariationInDegrees.HasValue && (_magneticDeviationProvider == rmc.TalkerId || _magneticDeviationProvider == TalkerId.Any))
+                    {
+                        MagneticVariation = rmc.MagneticVariationInDegrees.Value;
+                        _magneticDeviationProvider = sentence.TalkerId;
+                    }
+                }
             }
         }
 
@@ -492,12 +323,203 @@ namespace Iot.Device.Nmea0183
         }
 
         /// <summary>
-        /// Adds the given sentence to the cache - if manual filling is preferred
+        /// Adds the given sentence explicitly to the cache
         /// </summary>
-        /// <param name="sentence">Sentence to add</param>
-        public void Add(NmeaSentence sentence)
+        /// <param name="source">The source of the sentence</param>
+        /// <param name="sentence">The sentence</param>
+        public void Add(NmeaSinkAndSource source, NmeaSentence sentence)
         {
-            OnNewSequence(null, sentence);
+            OnNewSequence(source, sentence);
+        }
+
+        /// <summary>
+        /// Adds a sentence to the cache, but only to the list of sentences from this particular source,
+        /// so the message will not override the effect of a <see cref="GetLastSentence(Iot.Device.Nmea0183.SentenceId)"/> call.
+        /// </summary>
+        /// <param name="source">The source. Must be non-null</param>
+        /// <param name="sentence">The sentence. Must be non-null</param>
+        public void AddFromSource(NmeaSinkAndSource source, NmeaSentence sentence)
+        {
+            ArgumentNullException.ThrowIfNull(source);
+            ArgumentNullException.ThrowIfNull(sentence);
+            string sourceName = source.InterfaceName;
+            lock (_lock)
+            {
+                // We already own the lock to do that a bit more complex update.
+                if (_sentencesBySource.TryGetValue(sourceName, out var dict))
+                {
+                    dict[sentence.SentenceId] = sentence;
+                }
+                else
+                {
+                    var d = new Dictionary<SentenceId, NmeaSentence>();
+                    d[sentence.SentenceId] = sentence;
+                    _sentencesBySource[sourceName] = d;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tries to get a DIN sentence type
+        /// </summary>
+        /// <typeparam name="T">The type of the sentence to query</typeparam>
+        /// <param name="hexId">The hexadecimal identifier for this sub-message</param>
+        /// <param name="sentence">Receives the sentence, if any was found</param>
+        /// <returns>True on success, false if no such message was received</returns>
+        public bool TryGetLastDinSentence<T>(int hexId,
+            [NotNullWhen(true)]
+            out T? sentence)
+            where T : NmeaSentence
+        {
+            CleanOutdatedEntries();
+            // The second condition should always be true, because this list only contains din messages
+            if (!_dinData.TryGetValue(hexId, out var s) || s.SentenceId != ProprietaryMessage.Id)
+            {
+                sentence = null;
+                return false;
+            }
+
+            if (s is T)
+            {
+                sentence = (T)s;
+                return true;
+            }
+
+            sentence = null;
+            return false;
+        }
+
+        /// <summary>
+        /// Gets the last transducer data set (from an XDR sentence, see <see cref="TransducerMeasurement"/>) if one with the given name exists.
+        /// </summary>
+        /// <param name="name">The name of the data set. Case sensitive</param>
+        /// <param name="data">Returns the value if it exists</param>
+        /// <returns>True if a value with the given name was found, false otherwise</returns>
+        public bool TryGetTransducerData(string name,
+            [NotNullWhen(true)]
+            out TransducerDataSet? data)
+        {
+            CleanOutdatedEntries();
+            lock (_lock)
+            {
+                if (_xdrData.TryGetValue(name, out var data1))
+                {
+                    data = data1;
+                    return true;
+                }
+            }
+
+            data = null;
+            return false;
+        }
+
+        /// <summary>
+        /// Queries the waypoint with the given name
+        /// </summary>
+        /// <param name="name">The name of the waypoint</param>
+        /// <param name="wp">The return data</param>
+        /// <returns>True if found, false otherwise</returns>
+        public bool TryGetWayPoint(string name,
+            [NotNullWhen(true)]
+            out Waypoint? wp)
+        {
+            CleanOutdatedEntries();
+            lock (_lock)
+            {
+                if (_wayPoints.TryGetValue(name, out var innerResult))
+                {
+                    wp = innerResult!;
+                    return true;
+                }
+
+                wp = null;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Returns the last RTE sentences received, to construct the active route.
+        /// A set of at most 100 elements is returned, with the newest entry first.
+        /// </summary>
+        /// <param name="routeParts">The list of RTE sentences</param>
+        /// <returns>True if a list was found, false if no RTE messages where received</returns>
+        public bool QueryActiveRouteSentences(out List<RoutePart> routeParts)
+        {
+            CleanOutdatedEntries();
+            List<RoutePart> routeSentences;
+            lock (_lock)
+            {
+                // Newest shall be first in list
+                routeSentences = _lastRouteSentences.ToList();
+                routeSentences.Reverse();
+            }
+
+            routeParts = routeSentences;
+            return routeSentences.Any();
+        }
+
+        /// <summary>
+        /// Returns a list of recently received <see cref="SatellitesInView"/> (GSV) messages.
+        /// </summary>
+        /// <param name="sats">The result</param>
+        /// <returns>True if the list was non-empty</returns>
+        public bool QuerySatellitesInView(out List<SatellitesInView> sats)
+        {
+            CleanOutdatedEntries();
+            lock (_lock)
+            {
+                sats = _lastSatelliteInfos.ToList();
+                sats.Reverse();
+                return sats.Count > 0;
+            }
+        }
+
+        private void CleanOutdatedEntries()
+        {
+            if (MaxDataAge == Timeout.InfiniteTimeSpan)
+            {
+                return;
+            }
+
+            lock (_lock)
+            {
+                // Convert to list, so this can be done in one round
+                foreach (var entry in _sentences.ToList())
+                {
+                    if (entry.Value.Age > MaxDataAge)
+                    {
+                        _sentences.Remove(entry.Key);
+                        _logger.LogInformation($"Discarding outdated entries of type {entry.Key}");
+                    }
+                }
+
+                if (_lastRouteSentences.All(x => x.Age > MaxDataAge))
+                {
+                    _lastRouteSentences.Clear();
+                }
+
+                if (_lastSatelliteInfos.All(x => x.Age > MaxDataAge))
+                {
+                    _lastSatelliteInfos.Clear();
+                }
+
+                foreach (var entry in _dinData.ToList())
+                {
+                    if (entry.Value.Age > MaxDataAge)
+                    {
+                        _dinData.Remove(entry.Key);
+                    }
+                }
+
+                foreach (var entry in _sentencesBySource.ToList())
+                {
+                    // If one source is completely dead, remove it
+                    if (entry.Value.All(x => x.Value.Age > MaxDataAge))
+                    {
+                        _sentencesBySource.Remove(entry.Key);
+                    }
+                }
+            }
         }
     }
 }

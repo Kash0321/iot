@@ -16,7 +16,7 @@ Length stationHeight = Length.FromMeters(640); // Elevation of the sensor
 // bus id on the raspberry pi 3 and 4
 const int busId = 1;
 // set this to the current sea level pressure in the area for correct altitude readings
-Pressure defaultSeaLevelPressure = WeatherHelper.MeanSeaLevel;
+Pressure defaultSeaLevelPressure = WeatherHelper.MeanSeaLevelPressure;
 
 I2cConnectionSettings i2cSettings = new(busId, Bmp280.DefaultI2cAddress);
 I2cDevice i2cDevice = I2cDevice.Create(i2cSettings);
@@ -55,7 +55,7 @@ while (true)
     Console.WriteLine($"Pressure: {readResult.Pressure?.Hectopascals:0.##}hPa");
 
     // This time use altitude calculation
-    if (readResult.Temperature != null && readResult.Pressure != null)
+    if (readResult.Temperature.HasValue && readResult.Pressure.HasValue)
     {
         altValue = WeatherHelper.CalculateAltitude((Pressure)readResult.Pressure, defaultSeaLevelPressure, (Temperature)readResult.Temperature);
         Console.WriteLine($"Calculated Altitude: {altValue.Meters:0.##}m");
@@ -65,7 +65,7 @@ while (true)
     // Change the stationHeight value above to get a correct reading, but do not be tempted to insert
     // the value obtained from the formula above. Since that estimates the altitude based on pressure,
     // using that altitude to correct the pressure won't work.
-    if (readResult.Temperature != null && readResult.Pressure != null)
+    if (readResult.Temperature.HasValue && readResult.Pressure.HasValue)
     {
         var correctedPressure = WeatherHelper.CalculateBarometricPressure((Pressure)readResult.Pressure, (Temperature)readResult.Temperature, stationHeight);
         Console.WriteLine($"Pressure corrected for altitude {stationHeight:F0}m (with average humidity): {correctedPressure.Hectopascals:0.##} hPa");

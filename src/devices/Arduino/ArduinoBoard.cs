@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Device;
 using System.Device.Analog;
 using System.Text;
 using System.Device.Gpio;
@@ -78,6 +79,11 @@ namespace Iot.Device.Arduino
         /// <remarks>
         /// The device is initialized when the first command is sent. The constructor always succeeds.
         /// </remarks>
+        /// <remarks>
+        /// The stream must have a blocking read operation, or the connection might fail. Some serial port drivers incorrectly
+        /// return immediately when no data is available and the <code>ReadTimeout</code> is set to infinite (the default). In such a case, set the
+        /// ReadTimeout to a large value (such as <code>Int.Max - 10</code>), which will simulate a blocking call.
+        /// </remarks>
         /// <param name="serialPortStream">A stream to an Arduino/Firmata device</param>
         public ArduinoBoard(Stream serialPortStream)
         : this(serialPortStream, false)
@@ -95,9 +101,17 @@ namespace Iot.Device.Arduino
         {
             _dataStream = null;
             _serialPort = new SerialPort(portName, baudRate);
+            // Set the timeout to a long time, but not infinite. See the note for the constructor above.
+            _serialPort.ReadTimeout = int.MaxValue - 10;
             StreamUsesHardwareFlowControl = false; // Would need to configure the serial port externally for this to work
             _logger = this.GetCurrentClassLogger();
         }
+
+        /// <summary>
+        /// The recommended firmware version to use with this library.
+        /// When using an older version, some features might not work properly.
+        /// </summary>
+        public static Version ExpectedFirmwareVersion => new Version(3, 4);
 
         /// <summary>
         /// The board logger.
@@ -201,9 +215,7 @@ namespace Iot.Device.Arduino
         /// <param name="board">Returns the board if successful</param>
         /// <returns>True on success, false otherwise</returns>
         public static bool TryConnectToNetworkedBoard(IPAddress boardAddress, int port, bool useAutoReconnect,
-#if NET5_0_OR_GREATER
             [NotNullWhen(true)]
-#endif
             out ArduinoBoard? board)
         {
             try
@@ -329,6 +341,27 @@ namespace Iot.Device.Arduino
         }
 
         /// <summary>
+        /// Unregisters the given command handler
+        /// </summary>
+        /// <typeparam name="T">A type derived from <see cref="ExtendedCommandHandler"/></typeparam>
+        /// <param name="commandHandler">The instance</param>
+        /// <remarks>This is intended mostly for unit test scenarios, where the command handlers are recreated. It does not
+        /// remove the modes supported by the handler</remarks>
+        public void RemoveCommandHandler<T>(T commandHandler)
+            where T : ExtendedCommandHandler
+        {
+            _commandHandlersLock.EnterWriteLock();
+            try
+            {
+                _extendedCommandHandlers.Remove(commandHandler);
+            }
+            finally
+            {
+                _commandHandlersLock.ExitWriteLock();
+            }
+        }
+
+        /// <summary>
         /// Gets the command handler with the provided type. An exact type match is performed.
         /// </summary>
         /// <typeparam name="T">The type to query</typeparam>
@@ -425,7 +458,7 @@ namespace Iot.Device.Arduino
                 _firmataVersion = _firmata.QueryFirmataVersion();
                 if (_firmataVersion < _firmata.QuerySupportedFirmataVersion())
                 {
-                    throw new NotSupportedException($"Firmata version on board is {_firmataVersion}. Expected {_firmata.QuerySupportedFirmataVersion()}. They must be equal.");
+                    throw new NotSupportedException($"Firmata version on board is {_firmataVersion}. Expected at least {_firmata.QuerySupportedFirmataVersion()}.");
                 }
 
                 Logger.LogInformation($"Firmata version on board is {_firmataVersion}.");
@@ -434,6 +467,11 @@ namespace Iot.Device.Arduino
                 _firmwareName = firmwareName;
 
                 Logger.LogInformation($"Firmware version on board is {_firmwareVersion}");
+
+                if (_firmwareVersion < ExpectedFirmwareVersion)
+                {
+                    Logger.LogWarning($"Firmware version on board is {_firmwareVersion}. It is recommended to upgrade to {ExpectedFirmwareVersion}.");
+                }
 
                 _firmata.QueryCapabilities();
 
@@ -447,6 +485,19 @@ namespace Iot.Device.Arduino
 
                 _firmata.EnableDigitalReporting();
 
+                string? result = _firmata.CheckSystemVariablesSupported();
+                if (result != null)
+                {
+                    Logger.LogInformation($"System variable support not available in firmware. Error: {result}");
+                }
+                else
+                {
+                    Logger.LogInformation("System variable support detected");
+                    GetSystemVariable(SystemVariable.MaxSysexSize, -1, out int bufferSize);
+                    // Should be excluding the SYSEX byte itself and the terminator, but see https://github.com/firmata/ConfigurableFirmata/issues/136
+                    Logger.LogInformation($"Maximum SYSEX message size: {bufferSize}");
+                }
+
                 foreach (ExtendedCommandHandler e in _extendedCommandHandlers)
                 {
                     e.Registered(_firmata, this);
@@ -457,13 +508,64 @@ namespace Iot.Device.Arduino
             }
         }
 
+        /// <summary>
+        /// Queries the given system variable.
+        /// </summary>
+        /// <param name="variableId">The variable to query</param>
+        /// <param name="value">Receives the value</param>
+        /// <returns>True on success, false otherwise (value not supported, etc. Check the log output)</returns>
+        /// <exception cref="IOException">There was an error sending the command</exception>
+        public bool GetSystemVariable(SystemVariable variableId, out int value)
+        {
+            value = 0;
+            return Firmata.GetOrSetSystemVariable(variableId, -1, true, ref value);
+        }
+
+        /// <summary>
+        /// Queries the given system variable.
+        /// </summary>
+        /// <param name="variableId">The variable to query</param>
+        /// <param name="pinNumber">The pin number to use (-1 if not applicable for the given parameter)</param>
+        /// <param name="value">Receives the value</param>
+        /// <returns>True on success, false otherwise (value not supported, etc. Check the log output)</returns>
+        /// <exception cref="IOException">There was an error sending the command</exception>
+        public bool GetSystemVariable(SystemVariable variableId, int pinNumber, out int value)
+        {
+            value = 0;
+            return Firmata.GetOrSetSystemVariable(variableId, pinNumber, true, ref value);
+        }
+
+        /// <summary>
+        /// Update the given system variable.
+        /// </summary>
+        /// <param name="variableId">The variable to update</param>
+        /// <param name="value">The new value</param>
+        /// <returns>True on success, false otherwise (check the log output)</returns>
+        /// <exception cref="IOException">There was a communication error</exception>
+        public bool SetSystemVariable(SystemVariable variableId, int value)
+        {
+            return Firmata.GetOrSetSystemVariable(variableId, -1, false, ref value);
+        }
+
+        /// <summary>
+        /// Update the given system variable.
+        /// </summary>
+        /// <param name="variableId">The variable to update</param>
+        /// <param name="pinNumber">The pin number to use, or -1 if not relevant</param>
+        /// <param name="value">The new value</param>
+        /// <returns>True on success, false otherwise (check the log output)</returns>
+        /// <exception cref="IOException">There was a communication error</exception>
+        public bool SetSystemVariable(SystemVariable variableId, int pinNumber, int value)
+        {
+            return Firmata.GetOrSetSystemVariable(variableId, pinNumber, false, ref value);
+        }
+
         private void RegisterCommandHandlers()
         {
-            lock (_commandHandlersLock)
-            {
-                _extendedCommandHandlers.Add(new DhtSensor());
-                _extendedCommandHandlers.Add(new FrequencySensor());
-            }
+            _commandHandlersLock.EnterWriteLock();
+            _extendedCommandHandlers.Add(new DhtSensor());
+            _extendedCommandHandlers.Add(new FrequencySensor());
+            _commandHandlersLock.ExitWriteLock();
         }
 
         /// <summary>
@@ -471,27 +573,26 @@ namespace Iot.Device.Arduino
         /// </summary>
         private void RegisterKnownSupportedModes()
         {
-            lock (_commandHandlersLock)
-            {
-                // We add all known modes to the list, even though we don't really support them all in the core
-                _knownSupportedModes.Add(SupportedMode.DigitalInput);
-                _knownSupportedModes.Add(SupportedMode.DigitalOutput);
-                _knownSupportedModes.Add(SupportedMode.AnalogInput);
-                _knownSupportedModes.Add(SupportedMode.Pwm);
-                _knownSupportedModes.Add(SupportedMode.Servo);
-                _knownSupportedModes.Add(SupportedMode.Shift);
-                _knownSupportedModes.Add(SupportedMode.I2c);
-                _knownSupportedModes.Add(SupportedMode.OneWire);
-                _knownSupportedModes.Add(SupportedMode.Stepper);
-                _knownSupportedModes.Add(SupportedMode.Encoder);
-                _knownSupportedModes.Add(SupportedMode.Serial);
-                _knownSupportedModes.Add(SupportedMode.InputPullup);
-                _knownSupportedModes.Add(SupportedMode.Spi);
-                _knownSupportedModes.Add(SupportedMode.Sonar);
-                _knownSupportedModes.Add(SupportedMode.Tone);
-                _knownSupportedModes.Add(SupportedMode.Dht);
-                _knownSupportedModes.Add(SupportedMode.Frequency);
-            }
+            _commandHandlersLock.EnterWriteLock();
+            // We add all known modes to the list, even though we don't really support them all in the core
+            _knownSupportedModes.Add(SupportedMode.DigitalInput);
+            _knownSupportedModes.Add(SupportedMode.DigitalOutput);
+            _knownSupportedModes.Add(SupportedMode.AnalogInput);
+            _knownSupportedModes.Add(SupportedMode.Pwm);
+            _knownSupportedModes.Add(SupportedMode.Servo);
+            _knownSupportedModes.Add(SupportedMode.Shift);
+            _knownSupportedModes.Add(SupportedMode.I2c);
+            _knownSupportedModes.Add(SupportedMode.OneWire);
+            _knownSupportedModes.Add(SupportedMode.Stepper);
+            _knownSupportedModes.Add(SupportedMode.Encoder);
+            _knownSupportedModes.Add(SupportedMode.Serial);
+            _knownSupportedModes.Add(SupportedMode.InputPullup);
+            _knownSupportedModes.Add(SupportedMode.Spi);
+            _knownSupportedModes.Add(SupportedMode.Sonar);
+            _knownSupportedModes.Add(SupportedMode.Tone);
+            _knownSupportedModes.Add(SupportedMode.Dht);
+            _knownSupportedModes.Add(SupportedMode.Frequency);
+            _commandHandlersLock.ExitWriteLock();
         }
 
         /// <summary>
@@ -640,7 +741,7 @@ namespace Iot.Device.Arduino
                 throw new ObjectDisposedException(nameof(_firmata));
             }
 
-            return new GpioController(PinNumberingScheme.Logical, new ArduinoGpioControllerDriver(_firmata, _supportedPinConfigurations));
+            return new GpioController(new ArduinoGpioControllerDriver(_firmata, _supportedPinConfigurations));
         }
 
         /// <inheritdoc />
@@ -756,18 +857,28 @@ namespace Iot.Device.Arduino
         {
             Initialize();
 
-            return new ArduinoAnalogController(this, SupportedPinConfigurations, PinNumberingScheme.Logical);
+            return new ArduinoAnalogController(this, SupportedPinConfigurations);
         }
 
         /// <summary>
         /// Configures the sampling interval for analog input pins (when an event callback is enabled)
         /// </summary>
         /// <param name="timeSpan">Timespan between updates. Default ~20ms</param>
-        public void SetAnalogPinSamplingInterval(TimeSpan timeSpan)
+        public void SetAnalogInputSamplingInterval(TimeSpan timeSpan)
         {
             Initialize();
 
             Firmata.SetAnalogInputSamplingInterval(timeSpan);
+        }
+
+        /// <summary>
+        /// Query the current analog input sampling interval.
+        /// </summary>
+        /// <returns>The timespan between analog reads, if any are configured</returns>
+        public TimeSpan GetAnalogInputSamplingInterval()
+        {
+            Initialize();
+            return Firmata.GetAnalogInputSamplingInterval();
         }
 
         /// <summary>
@@ -848,6 +959,16 @@ namespace Iot.Device.Arduino
             {
                 Firmata.DisableSpi();
             }
+        }
+
+        /// <inheritdoc />
+        public override ComponentInformation QueryComponentInformation()
+        {
+            var self = base.QueryComponentInformation();
+            self.Properties["FirmwareVersion"] = FirmwareVersion.ToString();
+            self.Properties["FirmwareName"] = FirmwareName;
+            self.Properties["FirmataVersion"] = FirmataVersion.ToString();
+            return self;
         }
 
         /// <summary>

@@ -12,7 +12,8 @@ namespace Iot.Device.Nmea0183.Sentences
     /// <summary>
     /// MWV sentence: Wind speed and wind angle (true or apparent)
     /// Note that the wind angle is always given relative to the ship's bow, so to get the wind direction
-    /// in cardinal direction, the heading is required (or with some error, COG can be used)
+    /// in cardinal direction, the heading is required (or with some error, COG can be used).
+    /// See <see cref="WindDirectionWithRespectToNorth"/> for geographic wind direction.
     /// </summary>
     public class WindSpeedAndAngle : NmeaSentence
     {
@@ -57,7 +58,7 @@ namespace Iot.Device.Nmea0183.Sentences
         }
 
         /// <summary>
-        /// Date and time message (ZDA). This should not normally need the last time as argument, because it defines it.
+        /// Constructor that decodes a message.
         /// </summary>
         public WindSpeedAndAngle(TalkerId talkerId, IEnumerable<string> fields, DateTimeOffset time)
             : base(talkerId, Id, time)

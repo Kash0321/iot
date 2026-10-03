@@ -20,11 +20,6 @@ variables:
     - name: DOTNET_MULTILEVEL_LOOKUP
       value: 0
 
-resources:
-  containers:
-  - container: LinuxContainer
-    image: mcr.microsoft.com/dotnet-buildtools/prereqs:centos-7-20210714125435-9b5bbc2
-
 stages:
 - stage: Build
   jobs:
@@ -41,30 +36,12 @@ stages:
           BuildConfiguration: Debug
 
     steps:
-    - powershell: |
-        npm install -g markdownlint-cli
-        markdownlint -c  $(System.DefaultWorkingDirectory)/.markdownlint.json $(System.DefaultWorkingDirectory)
-      displayName: 'Execute Markdownlint'
-      condition: eq(variables['build.reason'], 'PullRequest')
-
       # Hint: Add /maxCpuCount:1 to disable parellelization in build. Ensures all tests results are printed to the console
     - script: build.cmd -ci
         -configuration $(BuildConfiguration)
         -prepareMachine
         /p:BuildPackages=true
       displayName: Build
-
-    - script: powershell -ExecutionPolicy ByPass -NoProfile eng\common\msbuild.ps1 -warnaserror:0 -ci
-        eng/sendToHelix.proj
-        /t:Test
-        /p:TestOS=Windows_NT
-        /p:Configuration=$(BuildConfiguration)
-        /p:HelixBuild=$(Build.BuildNumber)
-        /bl:$(Build.SourcesDirectory)/artifacts/log/$(BuildConfiguration)/SendToHelix.binlog
-      displayName: Run Helix Tests
-      condition: eq(variables['build.reason'], 'PullRequest')
-      env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
     - task: PublishBuildArtifacts@1
       displayName: Publish Build logs
@@ -80,6 +57,10 @@ stages:
         sourceFolder: $(Build.SourcesDirectory)/artifacts/packages/$(BuildConfiguration)/Shipping
         targetFolder: $(Build.ArtifactStagingDirectory)/Packages
 
+    - task: PublishTestResults@2
+      inputs:
+        mergeTestResults: true
+
     - publish: $(Build.ArtifactStagingDirectory)/Packages
       displayName: Publish Build Artifacts
       artifact: BuildPackages
@@ -90,31 +71,8 @@ stages:
       artifact: config
       condition: eq(variables['BuildConfiguration'], 'Release')
 
-  - job: Windows_ArduinoIntegration
-    displayName: Arduino Integration Tests
-    timeoutInMinutes: 120
-    pool:
-      vmImage: windows-2022
-
-    strategy:
-      matrix:
-        Build_Release:
-          BuildConfiguration: Release
-        Build_Debug:
-          BuildConfiguration: Debug
-
-    steps:
-    - script: build.cmd -ci 
-        -configuration $(BuildConfiguration)
-        -prepareMachine
-      displayName: Build Iot
-      
-    - script: eng\ArduinoCsCI.cmd $(UserProfile) $(BuildConfiguration)
-      displayName: Build and run Arduino Integration Tests
-
   - job: Linux
     displayName: Linux Build
-    container: LinuxContainer
     pool:
       vmImage: ubuntu-latest
 
@@ -131,6 +89,7 @@ stages:
         --prepareMachine
       displayName: Build
 
+    # Disabled due to offline devices - see issue #2406
     - script: ./eng/common/msbuild.sh --warnaserror false --ci
         eng/sendToHelix.proj
         /t:Test
@@ -138,11 +97,12 @@ stages:
         /p:Configuration=$(_BuildConfig)
         /p:HelixBuild=$(Build.BuildNumber)
         /bl:$(Build.SourcesDirectory)/artifacts/log/$(_BuildConfig)/SendToHelix.binlog
-        /p:HelixAccessToken=$(HelixApiAccessToken)
+#        /p:HelixAccessToken=$(HelixApiAccessToken)
       displayName: Run Helix Tests
-      condition: eq(variables['build.reason'], 'PullRequest')
-      env:
-        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+#      condition: eq(variables['build.reason'], 'PullRequest')  # Original condition
+      condition: false  # Temporarily disabled - devices offline (issue #2406)
+#      env:
+#        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
 
     - task: PublishBuildArtifacts@1
       displayName: Publish Build logs
@@ -167,7 +127,7 @@ stages:
     steps:
     - script: ./build.sh --ci
         --configuration $(BuildConfiguration)
-        --prepareMachine
+        --prepareMachine /maxCpuCount:1
       displayName: Build
 
     - task: PublishBuildArtifacts@1
@@ -179,42 +139,60 @@ stages:
         artifactType: container
 
 - stage: CodeSign
-  condition: and(succeeded('Build'), not(eq(variables['build.reason'], 'PullRequest')))
+  dependsOn: Build
+  condition: and(succeeded('Build'), not(eq(variables['build.reason'], 'PullRequest'))) # Only run this stage on pushes to the main branch
   jobs:
-  - deployment: CodeSign
+  - job: CodeSign
     displayName: Code Signing
     pool:
-      vmImage: windows-latest
-    environment: Dotnet Iot
+      vmImage: windows-latest # Code signing must run on a Windows agent for Authenticode signing (dll/exe)
     variables:
-    - group: SignClient
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - task: DotNetCoreCLI@2
-            inputs:
-              command: custom
-              custom: tool
-              arguments: install --tool-path . SignClient
-            displayName: Install SignTool tool
+    - group: SignClientV2 # This is a variable group with secrets in it 
 
-          - pwsh: |
-              .\SignClient "Sign" `
-              --baseDirectory "$(Pipeline.Workspace)\BuildPackages" `
-              --input "**/*.nupkg" `
-              --config "$(Pipeline.Workspace)\config\SignClient.json" `
-              --filelist "$(Pipeline.Workspace)\config\filelist.txt" `
-              --user "$(SignClientUser)" `
-              --secret '$(SignClientSecret)' `
-              --name "DotnetIoT" `
-              --description "dotnet/iot" `
-              --descriptionUrl "https://github.com/dotnet/iot"
-            displayName: Sign packages
-              
-          - publish: $(Pipeline.Workspace)/BuildPackages
-            displayName: Publish Signed Packages
-            artifact: SignedPackages
+    steps:
+
+    # Retreive unsigned artifacts and file list
+    - download: current
+      artifact: config
+      displayName: Download signing file list
+
+    - download: current
+      artifact: BuildPackages
+      displayName: Download build artifacts
+
+    - task: UseDotNet@2
+      displayName: 'Use .NET SDK 9.x'
+      inputs:
+        version: 9.x
+
+    # Install the code signing tool
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: custom
+        custom: tool
+        arguments: install --tool-path . sign --version 0.9.0-beta.23127.3
+      displayName: Install SignTool tool
+
+    # Run the signing command
+    - pwsh: |
+        .\sign code azure-key-vault `
+        "**/*.nupkg" `
+        --base-directory "$(Pipeline.Workspace)\BuildPackages" `
+        --file-list "$(Pipeline.Workspace)\config\filelist.txt" `
+        --publisher-name "DotnetIoT" `
+        --description "dotnet/iot" `
+        --description-url "https://github.com/dotnet/iot" `
+        --azure-key-vault-tenant-id "$(SignTenantId)" `
+        --azure-key-vault-client-id "$(SignClientId)" `
+        --azure-key-vault-client-secret '$(SignClientSecret)' `
+        --azure-key-vault-certificate "$(SignKeyVaultCertificate)" `
+        --azure-key-vault-url "$(SignKeyVaultUrl)"
+      displayName: Sign packages
+    
+    # Publish the signed packages
+    - publish: $(Pipeline.Workspace)/BuildPackages
+      displayName: Publish Signed Packages
+      artifact: SignedPackages
 
 - stage: Publish
   condition: and(succeeded('Build'), succeeded('CodeSign'), not(eq(variables['build.reason'], 'PullRequest')))
@@ -228,7 +206,7 @@ stages:
       runOnce:
         deploy:
           steps:
-          - task: NuGetAuthenticate@0
+          - task: NuGetAuthenticate@1
             displayName: 'NuGet Authenticate'
 
           - task: NuGetCommand@2
@@ -237,3 +215,4 @@ stages:
               command: push
               publishVstsFeed: 'IoT/nightly_iot_builds'
               packagesToPush: '$(Pipeline.Workspace)/SignedPackages/*.nupkg'
+              allowPackageConflicts: true

@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,6 +36,8 @@ internal unsafe class RaspberryPi3LinuxDriver : GpioDriver
 
     private UnixDriver? _interruptDriver = null;
 
+    private string? _detectedModel;
+
     public RaspberryPi3LinuxDriver()
     {
         _pinModes = new PinState[PinCount];
@@ -60,47 +63,6 @@ internal unsafe class RaspberryPi3LinuxDriver : GpioDriver
         {
             throw new ArgumentException("The specified pin number is invalid.", nameof(pinNumber));
         }
-    }
-
-    /// <summary>
-    /// Converts a board pin number to the driver's logical numbering scheme.
-    /// </summary>
-    /// <param name="pinNumber">The board pin number to convert.</param>
-    /// <returns>The pin number in the driver's logical numbering scheme.</returns>
-    protected internal override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber)
-    {
-        return pinNumber switch
-        {
-            3 => 2,
-            5 => 3,
-            7 => 4,
-            8 => 14,
-            10 => 15,
-            11 => 17,
-            12 => 18,
-            13 => 27,
-            15 => 22,
-            16 => 23,
-            18 => 24,
-            19 => 10,
-            21 => 9,
-            22 => 25,
-            23 => 11,
-            24 => 8,
-            26 => 7,
-            27 => 0,
-            28 => 1,
-            29 => 5,
-            31 => 6,
-            32 => 12,
-            33 => 13,
-            35 => 19,
-            36 => 16,
-            37 => 26,
-            38 => 20,
-            40 => 21,
-            _ => throw new ArgumentException($"Board (header) pin {pinNumber} is not a GPIO pin on the {GetType().Name} device.", nameof(pinNumber))
-        };
     }
 
     /// <summary>
@@ -173,6 +135,13 @@ internal unsafe class RaspberryPi3LinuxDriver : GpioDriver
 
         uint register = _registerViewPointer->GPLEV[pinNumber / 32];
         return Convert.ToBoolean((register >> (pinNumber % 32)) & 1) ? PinValue.High : PinValue.Low;
+    }
+
+    /// <inheritdoc/>
+    protected internal override void Toggle(int pinNumber)
+    {
+        ValidatePinNumber(pinNumber);
+        _interruptDriver!.Toggle(pinNumber);
     }
 
     /// <summary>
@@ -615,14 +584,18 @@ internal unsafe class RaspberryPi3LinuxDriver : GpioDriver
 
     private void InitializeInterruptDriver()
     {
-        try
+        if (TryCreate(() => new LibGpiodDriver(0), out _interruptDriver))
         {
-            _interruptDriver = new LibGpiodDriver(0);
+            return;
         }
-        catch (PlatformNotSupportedException)
+
+        if (TryCreate(() => new LibGpiodV2Driver(0), out _interruptDriver))
         {
-            _interruptDriver = new InterruptSysFsDriver(this);
+            return;
         }
+
+        // Let it altogether fail if this also doesn't work
+        _interruptDriver = new InterruptSysFsDriver(this);
     }
 
     private void Initialize()
@@ -647,21 +620,26 @@ internal unsafe class RaspberryPi3LinuxDriver : GpioDriver
             fileDescriptor = Interop.open(GpioMemoryFilePath, FileOpenFlags.O_RDWR | FileOpenFlags.O_SYNC);
             if (fileDescriptor == -1)
             {
+                // Can't use ExceptionHelper.GetLastErrorMessage() here because we need the error code
+                // for the ENOENT check. GetLastErrorMessage() would call GetLastWin32Error() internally,
+                // and we can't call GetLastWin32Error() twice as subsequent calls might return different values.
                 win32Error = Marshal.GetLastWin32Error();
+                string errorMessage = Marshal.GetLastPInvokeErrorMessage();
 
                 // if the failure is NOT because /dev/gpiomem doesn't exist then throw an exception at this point.
                 // if it were anything else then it is probably best not to try and use /dev/mem on the basis that
                 // it would be better to solve the issue rather than use a method that requires root privileges
                 if (win32Error != ENOENT)
                 {
-                    throw new IOException($"Error {win32Error} initializing the Gpio driver.");
+                    string error = string.IsNullOrWhiteSpace(errorMessage) ? win32Error.ToString() : $"{win32Error} ({errorMessage})";
+                    throw new IOException($"Error {error} initializing the Gpio driver.");
                 }
 
                 // if /dev/gpiomem doesn't seem to be available then let's try /dev/mem
                 fileDescriptor = Interop.open(MemoryFilePath, FileOpenFlags.O_RDWR | FileOpenFlags.O_SYNC);
                 if (fileDescriptor == -1)
                 {
-                    throw new IOException($"Error {Marshal.GetLastWin32Error()} initializing the Gpio driver.");
+                    throw new IOException($"Error {ExceptionHelper.GetLastErrorMessage()} initializing the Gpio driver.");
                 }
                 else // success so set the offset into memory of the gpio registers
                 {
@@ -699,7 +677,7 @@ internal unsafe class RaspberryPi3LinuxDriver : GpioDriver
             IntPtr mapPointer = Interop.mmap(IntPtr.Zero, Environment.SystemPageSize, (MemoryMappedProtections.PROT_READ | MemoryMappedProtections.PROT_WRITE), MemoryMappedFlags.MAP_SHARED, fileDescriptor, (int)gpioRegisterOffset);
             if (mapPointer.ToInt64() == -1)
             {
-                throw new IOException($"Error {Marshal.GetLastWin32Error()} initializing the Gpio driver.");
+                throw new IOException($"Error {ExceptionHelper.GetLastErrorMessage()} initializing the Gpio driver.");
             }
 
             Interop.close(fileDescriptor);
@@ -711,11 +689,13 @@ internal unsafe class RaspberryPi3LinuxDriver : GpioDriver
             {
                 if (File.Exists(ModelFilePath))
                 {
-                    string model = File.ReadAllText(ModelFilePath, Text.Encoding.ASCII);
-                    if (model.Contains("Raspberry Pi 4"))
+                    string model = File.ReadAllText(ModelFilePath, Encoding.ASCII);
+                    if (model.Contains("Raspberry Pi 4") || model.Contains("Raspberry Pi Compute Module 4"))
                     {
                         IsPi4 = true;
                     }
+
+                    _detectedModel = model;
                 }
             }
             catch (Exception x)
@@ -758,6 +738,37 @@ internal unsafe class RaspberryPi3LinuxDriver : GpioDriver
 
         _interruptDriver?.Dispose();
         _interruptDriver = null;
+    }
+
+    /// <inheritdoc />
+    public override ComponentInformation QueryComponentInformation()
+    {
+        StringBuilder sb = new StringBuilder();
+        Initialize();
+        if (_detectedModel != null)
+        {
+            sb.Append(_detectedModel);
+        }
+        else
+        {
+            sb.Append($"Raspberry Pi {(IsPi4 ? "4" : "3")}");
+        }
+
+        sb.Append($" linux driver with {PinCount} pins");
+        if (_interruptDriver != null)
+        {
+            sb.Append(" and an interrupt driver");
+        }
+
+        ComponentInformation ci = new ComponentInformation(this, sb.ToString());
+        ci.Properties["Model"] = _detectedModel ?? string.Empty;
+
+        if (_interruptDriver != null)
+        {
+            ci.AddSubComponent(_interruptDriver.QueryComponentInformation());
+        }
+
+        return ci;
     }
 
     private class PinState

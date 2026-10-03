@@ -10,13 +10,13 @@ Application note on how to operate PN5180 without a [library](https://www.nxp.co
 
 ## Board
 
-You will find different implementation of this board. All boards should have full SPI pins plus the reset and busy ones and additionnaly 5V and or 3.3V plus ground. This pictures shows an example of one of the implementation connected with a [FT4222](../FT4222/README.md) chipset to provide the necessary GPIO and SPI features:
+You will find different implementation of this board. All boards should have full SPI pins plus the reset and busy ones and additionnaly 5V and or 3.3V plus ground. This pictures shows an example of one of the implementation connected with a [FT4222](../Ft4222/README.md) chipset to provide the necessary GPIO and SPI features:
 
 ![PN5180](./pn5180_ft4222.png)
 
 ## Usage
 
-You will find a full example in the [samples directory](./samples/Program.cs). This example covers the usage of most of the public functions and properties. This example shows as well how to use the [FT4222](../FT4222/README.md) as a SPI and GPIO controller. Note that the development for the PN5180 has been done fully on a Windows 10 64 bit machine using this FT42222 to add the IoT capabilities.
+You will find a full example in the [samples directory](./samples/Program.cs). This example covers the usage of most of the public functions and properties. This example shows as well how to use the [FT4222](../Ft4222/README.md) as a SPI and GPIO controller. Note that the development for the PN5180 has been done fully on a Windows 10 64 bit machine using this FT42222 to add the IoT capabilities.
 
 PN5180 is operated thru SPI and GPIO. GPIO is used to control the SPI behavior as the PN5180 is using SPI in specific way. This does then require to manually manage the pin selection for SPI. And another pin called pin busy is used to understand when the PN5180 is available to receive and send information.
 
@@ -108,13 +108,30 @@ do
 while (!Console.KeyAvailable);
 ```
 
-Please note that the ```ListenToCardIso14443TypeA``` and ```ListenToCardIso14443TypeB``` can be configured with different transceiver and receiver configurations. Usually the configuration need to match but you can adjust and change them. See the section with Radio Frequency configuration for more information.
+And for an ISO 15693 card:
+
+```csharp
+if (pn5180.ListenToCardIso15693(TransmitterRadioFrequencyConfiguration.Iso15693_ASK100_26, ReceiverRadioFrequencyConfiguration.Iso15693_26, out IList<Data26_53kbps>? cards, 20000))
+{
+    pn5180.ResetPN5180Configuration(TransmitterRadioFrequencyConfiguration.Iso15693_ASK100_26, ReceiverRadioFrequencyConfiguration.Iso15693_26);
+    foreach (Data26_53kbps card in cards)
+    {
+        Console.WriteLine($"Target number: {card.TargetNumber}");
+        Console.WriteLine($"UID: {BitConverter.ToString(card.NfcId)}");
+        Console.WriteLine($"DSFID: {card.Dsfid}");
+    }
+}
+```
+
+Please note that the ```ListenToCardIso14443TypeA```, ```ListenToCardIso14443TypeB``` and ```ListenToCardIso15693``` can be configured with different transceiver and receiver configurations. Usually the configuration need to match but you can adjust and change them. See the section with Radio Frequency configuration for more information.
 
 A card will be continuously tried to be detected during the duration on your polling. If nothing is detected or if any issue, the function will return false.
 
 Specific for type B cards, they have a target number. This target number is needed to transceive any information with the card. The PN5180 can support up to 14 cards at the same time. But you can only select 1 card at a time, so if you have a need for multiple card selected at the same time, it is recommended to chain this card detection with the number of cards you need to select and operate at the same time. Note that depending on the card, they may not been seen as still selected by the reader.
 
 You should deselect the Type B card at the end to release the target number. If not done, during the next poll, this implementation will test if the card is still present, keep it in this case.
+
+For 15693 cards, the PN5180 can support up to 16 cards at the same time. ```ListenToCardIso15693``` can inventory multiple card at a time.
 
 ## EEPROM
 
@@ -265,6 +282,53 @@ else
 }
 ```
 
+This shows how to read and write ICODE SLIX (ISO 15693) card fully:
+
+```csharp
+if (pn5180.ListenToCardIso15693(TransmitterRadioFrequencyConfiguration.Iso15693_ASK100_26, ReceiverRadioFrequencyConfiguration.Iso15693_26, out IList<Data26_53kbps>? cards, 20000))
+{
+    pn5180.ResetPN5180Configuration(TransmitterRadioFrequencyConfiguration.Iso15693_ASK100_26, ReceiverRadioFrequencyConfiguration.Iso15693_26);
+    foreach (Data26_53kbps card in cards)
+    {
+        Console.WriteLine($"Target number: {card.TargetNumber}");
+        Console.WriteLine($"UID: {BitConverter.ToString(card.NfcId)}");
+        Console.WriteLine($"DSFID: {card.Dsfid}");
+        if (card.NfcId[6] == 0x04)
+        {
+            IcodeCard icodeCard = new IcodeCard(pn5180, card.TargetNumber)
+            {
+                Uid = card.NfcId,
+                Capacity = IcodeCardCapacity.IcodeSlix,
+            };
+
+            icodeCard.GetSystemInformation();
+            Console.WriteLine($"SystemInfo data is :{BitConverter.ToString(icodeCard.Data)}");
+            icodeCard.Data = new byte[] { 0x1c, 0x1b, 0x1b, 0x1b };
+            // icodeCard.LockBlock(27);
+            icodeCard.WriteSingleBlock(2);
+            Console.WriteLine($"write data response is :{BitConverter.ToString(icodeCard.Data)}");
+            icodeCard.ReadMultipleBlocks(0, 3);
+            Console.WriteLine($"block 0~3 data is :{BitConverter.ToString(icodeCard.Data)}");
+            for (byte i = 0; i < 28; i++)
+            {
+                if (icodeCard.ReadSingleBlock(i))
+                {
+                    Console.WriteLine($"Block {i} data is :{BitConverter.ToString(icodeCard.Data)}");
+                }
+                else
+                {
+                    icodeCard.Data = new byte[] { };
+                }
+            }
+        }
+        else
+        {
+            Console.WriteLine("Only Icode cards are supported");
+        }
+    }
+}
+```
+
 The [example](./samples/Program.cs) contains as well an implementation to fully dump the content of a credit card.
 
 ## Current implementation
@@ -295,6 +359,7 @@ PN5180 as an initiator (reader) commands:
 
 - [X] Auto poll ISO 14443 type A cards
 - [X] Auto poll ISO 14443 type B cards
+- [X] Auto poll ISO 15693 cards
 - [X] Deselect ISO 14443 type B cards
 - [X] Multi card support at the same time: partial, depending on the card, CID mandatory in all 14443 type B communications
 - [X] ISO 14443-4 communication protocol

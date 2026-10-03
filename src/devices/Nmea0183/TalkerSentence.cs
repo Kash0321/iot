@@ -16,13 +16,13 @@ namespace Iot.Device.Nmea0183
     /// </summary>
     public class TalkerSentence
     {
-        private static ConcurrentDictionary<SentenceId, Func<TalkerSentence, DateTimeOffset, NmeaSentence>> s_registeredSentences;
+        private static ConcurrentDictionary<SentenceId, Func<TalkerSentence, DateTimeOffset, NmeaSentence?>> s_registeredSentences;
 
         private string[] _fields;
 
-        private static ConcurrentDictionary<SentenceId, Func<TalkerSentence, DateTimeOffset, NmeaSentence>> GetKnownSentences()
+        private static ConcurrentDictionary<SentenceId, Func<TalkerSentence, DateTimeOffset, NmeaSentence?>> GetKnownSentences()
         {
-            var knownSentences = new ConcurrentDictionary<SentenceId, Func<TalkerSentence, DateTimeOffset, NmeaSentence>>();
+            var knownSentences = new ConcurrentDictionary<SentenceId, Func<TalkerSentence, DateTimeOffset, NmeaSentence?>>();
 
             knownSentences[RecommendedMinimumNavigationInformation.Id] = (sentence, time) => new RecommendedMinimumNavigationInformation(sentence, time);
             knownSentences[TimeDate.Id] = (sentence, time) => new TimeDate(sentence, time);
@@ -31,6 +31,7 @@ namespace Iot.Device.Nmea0183
             knownSentences[HeadingMagnetic.Id] = (sentence, time) => new HeadingMagnetic(sentence, time);
             knownSentences[CrossTrackError.Id] = (sentence, time) => new CrossTrackError(sentence, time);
             knownSentences[DepthBelowSurface.Id] = (sentence, time) => new DepthBelowSurface(sentence, time);
+            knownSentences[DepthBelowTransducer.Id] = (sentence, time) => new DepthBelowTransducer(sentence, time);
             knownSentences[TransducerMeasurement.Id] = (sentence, time) => new TransducerMeasurement(sentence, time);
             knownSentences[GlobalPositioningSystemFixData.Id] = (sentence, time) => new GlobalPositioningSystemFixData(sentence, time);
             knownSentences[TrackMadeGood.Id] = (sentence, time) => new TrackMadeGood(sentence, time);
@@ -47,6 +48,35 @@ namespace Iot.Device.Nmea0183
             knownSentences[SatellitesInView.Id] = (sentence, time) => new SatellitesInView(sentence, time);
             knownSentences[WindDirectionWithRespectToNorth.Id] =
                 (sentence, time) => new WindDirectionWithRespectToNorth(sentence, time);
+            knownSentences[HeadingAndTrackControl.Id] = (sentence, time) => new HeadingAndTrackControl(sentence, time);
+            knownSentences[SeatalkNmeaMessage.Id] = (sentence, time) => new SeatalkNmeaMessage(sentence, time);
+            knownSentences[RudderSensorAngle.Id] = (sentence, time) => new RudderSensorAngle(sentence, time);
+            knownSentences[HeadingAndTrackControl.Id] = (sentence, time) => new HeadingAndTrackControl(sentence, time);
+            knownSentences[HeadingAndTrackControlStatus.Id] = (sentence, time) => new HeadingAndTrackControlStatus(sentence, time);
+            knownSentences[EstimatedAccuracy.Id] = (sentence, time) => new EstimatedAccuracy(sentence, time);
+            knownSentences[DepthOfWater.Id] = (sentence, time) => new DepthOfWater(sentence, time);
+            knownSentences[DistanceTraveledTroughWater.Id] = (sentence, time) => new DistanceTraveledTroughWater(sentence, time);
+            knownSentences[ProprietaryMessage.Id] = (sentence, time) =>
+            {
+                var specificMessageId = sentence.Fields.FirstOrDefault();
+                if (specificMessageId != null && int.TryParse(specificMessageId, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int msgid))
+                {
+                    if (msgid == SeaSmartEngineFast.HexId)
+                    {
+                        return new SeaSmartEngineFast(sentence, time);
+                    }
+                    else if (msgid == SeaSmartEngineDetail.HexId)
+                    {
+                        return new SeaSmartEngineDetail(sentence, time);
+                    }
+                    else if (msgid == SeaSmartFluidLevel.HexId)
+                    {
+                        return new SeaSmartFluidLevel(sentence, time);
+                    }
+                }
+
+                return null;
+            };
 
             return knownSentences;
         }
@@ -71,7 +101,10 @@ namespace Iot.Device.Nmea0183
         /// </summary>
         public IEnumerable<string> Fields => _fields;
 
-        /// <inheritdoc/>
+        /// <summary>
+        /// Converts the current message to NMEA format
+        /// </summary>
+        /// <returns>An NMEA0183 sentence, including checksum, ready to be sent</returns>
         public override string ToString()
         {
             string mainPart = string.Format(CultureInfo.InvariantCulture, "{0}{1},{2}", TalkerId, Id, string.Join(",", Fields));
@@ -149,6 +182,20 @@ namespace Iot.Device.Nmea0183
                 throw new ArgumentNullException(nameof(sentence));
             }
 
+            int idx = sentence.IndexOfAny(new char[] { '!', '$' });
+            if (idx < 0 || idx > 6)
+            {
+                // Valid sentences start with $ or ! (for the AIS sentences)
+                errorCode = NmeaError.NoSyncByte;
+                return null;
+            }
+
+            if (idx != 0)
+            {
+                // When the index of the $ is larger than 0 but less than a small amount, try to decode the remainder of the line
+                sentence = sentence.Remove(idx);
+            }
+
             if (sentence.Length < sentenceHeaderMinLength)
             {
                 errorCode = NmeaError.MessageToShort;
@@ -161,9 +208,9 @@ namespace Iot.Device.Nmea0183
                 return null;
             }
 
-            if (sentence[0] != '$' && sentence[0] != '!')
+            // There can't be any nonprintable characters in the stream (such as TAB or NULL)
+            if (sentence.Any(x => Char.IsControl(x)))
             {
-                // Valid sentences start with $ or ! (for the AIS sentences)
                 errorCode = NmeaError.NoSyncByte;
                 return null;
             }
@@ -176,7 +223,7 @@ namespace Iot.Device.Nmea0183
             }
 
             int firstComma = sentence.IndexOf(',', 1);
-            if (firstComma == -1)
+            if (firstComma <= 3)
             {
                 errorCode = NmeaError.MessageToShort;
                 return null;
@@ -303,18 +350,19 @@ namespace Iot.Device.Nmea0183
         public NmeaSentence? TryGetTypedValue(ref DateTimeOffset lastMessageTime)
         {
             NmeaSentence? retVal = null;
-            if (s_registeredSentences.TryGetValue(Id, out Func<TalkerSentence, DateTimeOffset, NmeaSentence>? producer))
+            if (s_registeredSentences.TryGetValue(Id, out Func<TalkerSentence, DateTimeOffset, NmeaSentence?>? producer))
             {
                 try
                 {
                     retVal = producer(this, lastMessageTime);
                 }
-                catch (Exception x) when (x is ArgumentException || x is ArgumentOutOfRangeException || x is FormatException)
+                catch (Exception x) when (x is ArgumentException || x is ArgumentOutOfRangeException || x is FormatException || x is OverflowException)
                 {
-                    return new RawSentence(TalkerId, Id, Fields, lastMessageTime);
+                    retVal = null;
                 }
             }
-            else
+
+            if (retVal == null)
             {
                 retVal = new RawSentence(TalkerId, Id, Fields, lastMessageTime);
             }

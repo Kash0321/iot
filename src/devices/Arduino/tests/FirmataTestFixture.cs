@@ -11,6 +11,8 @@ using System.Text;
 using Iot.Device.Arduino;
 using Iot.Device.Common;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Iot.Device.Arduino.Tests
@@ -27,7 +29,9 @@ namespace Iot.Device.Arduino.Tests
                 var loggerFactory = LoggerFactory.Create(builder =>
                 {
                     builder.AddProvider(new DebuggerOutputLoggerProvider())
-                        .SetMinimumLevel(LogLevel.Trace);
+                        .SetMinimumLevel(LogLevel.Debug);
+                    builder.AddProvider(new SimpleConsoleLoggerFactory())
+                        .SetMinimumLevel(LogLevel.Debug);
                 });
 
                 // Statically register our factory. Note that this must be done before instantiation of any class that wants to use logging.

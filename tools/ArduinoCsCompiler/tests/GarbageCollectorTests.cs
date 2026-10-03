@@ -14,7 +14,7 @@ using Xunit;
 namespace Iot.Device.Arduino.Tests
 {
     [Collection("SingleClientOnly")]
-    [Trait("feature", "firmata-compiler")]
+    [Trait("feature", "firmata")]
     [Trait("requires", "hardware")]
     public class GarbageCollectorTests : ArduinoTestBase, IClassFixture<FirmataTestFixture>, IDisposable
     {
@@ -22,24 +22,25 @@ namespace Iot.Device.Arduino.Tests
             : base(fixture)
         {
             Compiler.ClearAllData(true, false);
+            CompilerSettings.CreateKernelForFlashing = false;
         }
 
         [Fact]
         public void AllocateSimpleClass()
         {
-            ExecuteComplexProgramSuccess<Func<int>>(SimpleClass1.SimpleTest1, true);
+            ExecuteComplexProgramSuccess<Func<int>>(SimpleClass1.SimpleTest1, nameof(AllocateSimpleClass), true);
         }
 
         [Fact]
         public void SimpleGcStatistics()
         {
-            ExecuteComplexProgramSuccess<Func<int>>(SimpleClass1.SimpleGcStatistics, false);
+            ExecuteComplexProgramSuccess<Func<int>>(SimpleClass1.SimpleGcStatistics, nameof(SimpleGcStatistics), false);
         }
 
         [Fact]
         public void SimpleGcFunctions()
         {
-            ExecuteComplexProgramSuccess<Func<int>>(SimpleClass1.GcFunctions, true);
+            ExecuteComplexProgramSuccess<Func<int>>(SimpleClass1.GcFunctions, nameof(SimpleGcFunctions), true);
         }
 
         internal class SimpleClass1

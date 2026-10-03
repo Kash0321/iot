@@ -89,7 +89,7 @@ internal partial class InteropVideodev2
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
         public string description;
 
-        public PixelFormat pixelformat;
+        public VideoPixelFormat pixelformat;
 
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 4)]
         public uint[] reserved;
@@ -152,7 +152,7 @@ internal partial class InteropVideodev2
         [FieldOffset(4)]
         public uint height;
         [FieldOffset(8)]
-        public PixelFormat pixelformat;
+        public VideoPixelFormat pixelformat;
         [FieldOffset(12)]
         public v4l2_field field;
         [FieldOffset(16)]
@@ -228,7 +228,7 @@ internal partial class InteropVideodev2
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe struct v4l2_sdr_format
     {
-        public PixelFormat pixelformat;
+        public VideoPixelFormat pixelformat;
         public uint buffersize;
         public fixed byte reserved[24];
     }
@@ -241,7 +241,7 @@ internal partial class InteropVideodev2
     }
 
     [StructLayout(LayoutKind.Explicit)]
-    internal unsafe struct fmt
+    internal unsafe struct V412_Fmt
     {
         [FieldOffset(0)]
         public v4l2_pix_format pix;
@@ -263,7 +263,7 @@ internal partial class InteropVideodev2
     internal struct v4l2_format
     {
         public v4l2_buf_type type;
-        public fmt fmt;
+        public V412_Fmt fmt;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -339,7 +339,9 @@ internal partial class InteropVideodev2
         public v4l2_field field;
 
         [StructLayout(LayoutKind.Sequential)]
+#pragma warning disable CS8981 // The type name only contains lower-cased ascii characters. Such names may become reserved for the language.
         public struct timeval
+#pragma warning restore CS8981 // The type name only contains lower-cased ascii characters. Such names may become reserved for the language.
         {
             public nint tv_sec;
             public nint tv_usec;
@@ -373,7 +375,7 @@ internal partial class InteropVideodev2
         [FieldOffset(0)]
         public uint index;
         [FieldOffset(4)]
-        public PixelFormat pixel_format;
+        public VideoPixelFormat pixel_format;
         [FieldOffset(8)]
         public v4l2_frmsizetypes type;
         [FieldOffset(12)]

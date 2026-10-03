@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Iot.Device.Common;
 using Iot.Device.Nmea0183.Sentences;
@@ -143,6 +144,59 @@ namespace Iot.Device.Nmea0183.Tests
         }
 
         [Fact]
+        public void TransducerDataSetBehavior()
+        {
+            TransducerDataSet set1 = new TransducerDataSet("A", 4.2, "D", "ROLL");
+            Assert.Equal("A", set1.DataType);
+            Assert.Equal(4.2, set1.Value);
+            Assert.Equal("D", set1.Unit);
+            Assert.Equal("ROLL", set1.DataName);
+            Assert.Equal(Angle.FromDegrees(4.2), set1.AsAngle());
+            Assert.Null(set1.AsTemperature());
+
+            TransducerDataSet set2 = new TransducerDataSet("P", 1024.1234592738179, "P", "ENV_PRESS");
+            Assert.Equal("P,1024.12,P,ENV_PRESS", set2.ToString());
+
+            TransducerDataSet set3 = new TransducerDataSet("P", 12783741024.1234, "P", "ENV_PRESS"); // Something which results in a scientific notation with the G specifier
+            Assert.Equal("P,12783741024.1,P,ENV_PRESS", set3.ToString());
+        }
+
+        [Fact]
+        public void TransducerMeasurementBehavior()
+        {
+            TransducerDataSet set1 = new TransducerDataSet("A", 4.2, "D", "ROLL");
+
+            TransducerDataSet set2 = new TransducerDataSet("P", 1024.1234592738179, "P", "ENV_PRESS");
+            Assert.Equal("P,1024.12,P,ENV_PRESS", set2.ToString());
+
+            TransducerMeasurement ms = new TransducerMeasurement(new List<TransducerDataSet>() { set1, set2 });
+            Assert.Equal(2, ms.DataSets.Count);
+
+            // Collection is read-only
+            Assert.Throws<NotSupportedException>(() => ms.DataSets.Add(new TransducerDataSet()));
+
+            TransducerMeasurement ms2 = new TransducerMeasurement("ROLL", "A", 4.2, "D");
+
+            var set3 = ms2.DataSets[0];
+            Assert.Equal(set1.ToString(), set3.ToString());
+        }
+
+        [Fact]
+        public void ConstructRoute()
+        {
+            var rt = new Route("MyRoute");
+            Assert.False(rt.HasPoints);
+
+            rt = new Route("2", new GeographicPosition(10, -1, 0), new GeographicPosition(10, 0.99, 0), new GeographicPosition(10, 0.98, 0));
+            Assert.True(rt.HasPoints);
+            Assert.Equal(3, rt.Points.Count);
+
+            Assert.Equal(Angle.FromDegrees(89.827).Value, rt.Points[0].BearingToNextWaypoint.GetValueOrDefault().Value, 3);
+            Assert.Equal(Length.FromMeters(218182.004).Value, rt.Points[0].DistanceToNextWaypoint.GetValueOrDefault().Value, 3);
+            Assert.Equal("WP1", rt.Points[1].WaypointName);
+        }
+
+        [Fact]
         public void GgaDecode()
         {
             _lastPacketTime = DateTimeOffset.UtcNow;
@@ -231,7 +285,7 @@ namespace Iot.Device.Nmea0183.Tests
             CrossTrackError xte = (CrossTrackError)decoded!.TryGetTypedValue(ref _lastPacketTime)!;
 
             Assert.True(xte.Valid);
-            Assert.Equal(Length.Zero, xte.Distance);
+            Assert.True(xte.Distance.Equals(Length.Zero, Length.Zero));
         }
 
         [Fact]
@@ -334,6 +388,20 @@ namespace Iot.Device.Nmea0183.Tests
             Assert.True(wind.Relative);
             Assert.Equal(331.6 - 360.0, wind.Angle.Degrees, 1);
             Assert.Equal(0.7, wind.Speed.MetersPerSecond, 1);
+        }
+
+        [Fact]
+        public void VhwEncode()
+        {
+            string text = "10.0,T,15.0,M,9.9,N,18.4,K,A";
+
+            WaterSpeedAndAngle water = new WaterSpeedAndAngle(Angle.FromDegrees(10), Angle.FromDegrees(15),
+                Speed.FromMetersPerSecond(5.1));
+
+            Assert.True(water.Valid);
+            Assert.True(water.HeadingMagnetic.HasValue);
+            Assert.True(water.HeadingTrue.HasValue);
+            Assert.Equal(text, water.ToNmeaParameterList());
         }
 
         [Fact]
@@ -441,6 +509,74 @@ namespace Iot.Device.Nmea0183.Tests
             }
         }
 
+        [Fact]
+        public void HtcEncode()
+        {
+            var hdt = new HeadingAndTrackControl("M", null, "L", "N", null, null, null, null, null, null, null, true);
+            var msg = hdt.ToNmeaParameterList();
+            Assert.Equal("A,,L,M,N,,,,,,,,T", msg);
+
+            hdt = new HeadingAndTrackControl("H", Angle.FromDegrees(10.21), "L", "N", null, null, Length.FromNauticalMiles(22.29), null, null, null, Angle.FromDegrees(2), false);
+            msg = hdt.ToNmeaParameterList();
+            Assert.Equal("V,10.2,L,H,N,,,22.3,,,,2.0,M", msg);
+
+            var sentence = TalkerSentence.FromSentenceString("$GPHTC,V,10.2,L,H,N,,,22.3,,,,2.0,M", out var error);
+            Assert.Equal(NmeaError.None, error);
+            DateTimeOffset time = DateTimeOffset.UtcNow;
+            var hdt2 = (HeadingAndTrackControl)sentence!.TryGetTypedValue(ref time)!;
+            Assert.Equal(hdt.ToNmeaParameterList(), hdt2.ToNmeaParameterList());
+        }
+
+        [Fact]
+        public void HtdEncode()
+        {
+            var hdt = new HeadingAndTrackControlStatus("M", null, "L", "N", null, null, null, null, null, null, null, true, false, false, false, Angle.FromDegrees(10.12));
+            var msg = hdt.ToNmeaParameterList();
+            Assert.Equal("A,,L,M,N,,,,,,,,T,A,A,A,10.1", msg);
+
+            hdt = new HeadingAndTrackControlStatus("H", Angle.FromDegrees(10.21), "L", "N", null, null, Length.FromNauticalMiles(22.29), null, null, null, Angle.FromDegrees(2), false, true, true, true, Angle.FromDegrees(12.23));
+            msg = hdt.ToNmeaParameterList();
+            Assert.Equal("V,10.2,L,H,N,,,22.3,,,,2.0,M,V,V,V,12.2", msg);
+
+            var sentence = TalkerSentence.FromSentenceString("$GPHTD,V,10.2,L,H,N,,,22.3,,,,2.0,M,V,V,V,12.23", out var error);
+            Assert.Equal(NmeaError.None, error);
+            DateTimeOffset time = DateTimeOffset.UtcNow;
+            var hdt2 = (HeadingAndTrackControlStatus)sentence!.TryGetTypedValue(ref time)!;
+            Assert.Equal(hdt.ToNmeaParameterList(), hdt2.ToNmeaParameterList());
+            Assert.Equal(HeadingAndTrackControlStatus.Id, hdt.SentenceId);
+            Assert.Equal(HeadingAndTrackControlStatus.Id, hdt2.SentenceId);
+        }
+
+        [Fact]
+        public void SeaSmartFluidLevelEncode()
+        {
+            var msg = new SeaSmartFluidLevel(new FluidData(FluidType.BlackWater, Ratio.FromPercent(20),
+                Volume.FromLiters(100), 7, false));
+            var text = msg.ToNmeaParameterList();
+            Assert.Equal("01F211,00000000,02,570014E8030000FF", text);
+
+            var sentence = TalkerSentence.FromSentenceString("$PCDIN,01F211,00000000,02,570014E8030000FF", out var error);
+            Assert.Equal(NmeaError.None, error);
+            DateTimeOffset time = DateTimeOffset.UtcNow;
+            var msg2 = (SeaSmartFluidLevel)sentence!.TryGetTypedValue(ref time)!;
+            var param1 = msg.ToNmeaParameterList();
+            var param2 = msg2.ToNmeaParameterList();
+            Assert.Equal(param1, param2);
+            Assert.Equal(SeaSmartFluidLevel.HexId, msg2.Identifier);
+        }
+
+        [Fact]
+        public void StalkEncode()
+        {
+            var talk = new SeatalkNmeaMessage(new byte[]
+            {
+                0x9c, 00, 01
+            });
+
+            var msg = talk.ToNmeaParameterList();
+            Assert.Equal("9C,00,01", msg);
+        }
+
         [Theory]
         [InlineData("$GPRMC,211730.997,A,3511.28000,S,13823.26000,E,7.000,229.000,190120,,*19")]
         [InlineData("$GPRMC,115613.000,A,4729.49750,N,00930.39830,E,1.600,36.200,240520,1.900,E,D*34")]
@@ -464,10 +600,17 @@ namespace Iot.Device.Nmea0183.Tests
         [InlineData("$IIDBK,29.2,f,8.90,M,4.9,F*0B")] // Unknown sentence (for now)
         [InlineData("$GPGLL,4729.49680,N,00930.39770,E,115611.000,A,D*54")]
         [InlineData("$GPRTE,1,1,c,Route 008,R1,R2,R3,R4,R5*39")]
-        [InlineData("$YDVHW,,T,,M,3.1,N,5.7,K,*64")]
+        [InlineData("$YDVHW,,T,,M,3.1,N,5.7,K,A*25")]
         [InlineData("$ENRPM,S,1,3200,100,A*7B")]
         [InlineData("$ECMDA,30.12,I,1.020,B,18.5,C,,C,38.7,,4.2,C,,T,,M,,N,,M*37")]
         [InlineData("$YDGSV,5,1,18,19,29,257,45,22,30,102,45,04,76,143,44,06,47,295,42*73")]
+        [InlineData("!AIVDM,1,1,,B,ENk`sR9`92ah97PR9h0W1T@1@@@=MTpS<7GFP00003vP000,2*4B")]
+        [InlineData("$STALK,84,86,26,97,02,00,00,00,08*6F")]
+        [InlineData("$YDDBS,150.2,f,45.78,M,25.0,F*34")]
+        [InlineData("$YDDPT,45.28,0.50*63")]
+        [InlineData("$PGRME,3.0,M,3.0,M,4.2,M*28")]
+        [InlineData("$YDVLW,6613.611,N,6613.567,N*52")]
+        [InlineData("$PCDIN,01F211,00000000,02,00001026020000FF*20")]
         public void SentenceRoundTrip(string input)
         {
             var inSentence = TalkerSentence.FromSentenceString(input, out var error);
@@ -519,6 +662,9 @@ namespace Iot.Device.Nmea0183.Tests
         [InlineData("$HCHDG,30.9,,,1.9,E")]
         [InlineData("$YDVHW,,T,,M,3.1,N,5.7,K,*64")]
         [InlineData("$YDMWD,336.8,T,333.8,M,21.6,N,11.1,M*58")]
+        [InlineData("$APRSA,12.2,A,,V")]
+        [InlineData("$GPHTD,V,10.2,L,H,N,,,22.3,,,,2.0,M,V,V,V,12.23")]
+        [InlineData("$GPHTC,V,10.2,L,H,N,,,22.3,,,,2.0,M")]
         public void CanParseAllTheseMessages(string input)
         {
             var inSentence = TalkerSentence.FromSentenceString(input, out var error);
@@ -545,9 +691,16 @@ namespace Iot.Device.Nmea0183.Tests
         [InlineData("$GPGLL,4729.49680,N,00930.39770,E,115611.000,A,D")]
         [InlineData("$IIXDR,C,18.20,C,ENV_WATER_T,C,28.69,C,ENV_OUTAIR_T,P,101400,P,ENV_ATMOS_P")]
         [InlineData("$GPRMB,A,2.341,L,R3,R4,4728.92180,N,00930.33590,E,0.009,192.9,2.5,V,D")]
-        [InlineData("$YDVHW,,T,,M,3.1,N,5.7,K,")]
+        [InlineData("$YDVHW,,T,,M,3.1,N,5.7,K,A")]
         [InlineData("$YDGSV,5,1,18,19,29,257,45,22,30,102,45,04,76,143,44,06,47,295,42")]
         [InlineData("$YDMWD,336.8,T,333.8,M,21.6,N,11.1,M")]
+        [InlineData("$APHTC,V,10.0,L,R,N,12.3,13.4,2.0,1.0,15.1,0.5,16.2,T")]
+        [InlineData("$APHTD,V,10.0,L,R,N,12.0,13.5,2.0,1.0,15.1,0.5,16.2,T,V,A,V,123.2")]
+        [InlineData("$STALK,84,86,26,97,02,00,00,00,08")]
+        [InlineData("$STALK,9C,01,12,00")]
+        [InlineData("$GPHTD,V,10.2,L,H,N,,,22.3,,,,2.0,M,V,V,V,12.2")]
+        [InlineData("$GPHTC,V,10.2,L,H,N,,,22.3,,,,2.0,M")]
+        [InlineData("$PCDIN,01F211,00000000,02,00001026020000FF")]
         public void SentenceRoundTripIsUnaffectedByCulture(string input)
         {
             // de-DE has "," as decimal separator. Big trouble if using CurrentCulture for any parsing or formatting here
@@ -584,6 +737,7 @@ namespace Iot.Device.Nmea0183.Tests
         [InlineData("$YDVHW,,T,,M,3.1,N,5.7,K,")]
         [InlineData("$YDGSV,5,1,18,19,29,257,45,22,30,102,45,04,76,143,44,06,47,295,42")]
         [InlineData("$YDMWD,336.8,T,333.8,M,21.6,N,11.1,M")]
+        [InlineData("$APHTD,V,10.0,L,R,N,12,13,2.5,1.0,15.1,0.5,16.2,M")]
         public void TwoWaysOfGettingSentenceAreEqual(string input)
         {
             // de-DE has "," as decimal separator. Big trouble if using CurrentCulture for any parsing or formatting here

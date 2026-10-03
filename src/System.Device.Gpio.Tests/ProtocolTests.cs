@@ -1,20 +1,23 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System.Threading;
+using System.Collections.Generic;
 using System.Device.I2c;
 using System.Device.Pwm;
+using System.Threading;
 using Iot.Device.Adc;
 using Iot.Device.Bmxx80;
-using Xunit;
+using Iot.Device.Board;
 using UnitsNet;
+using Xunit;
 using static System.Device.Gpio.Tests.SetupHelpers;
 
 namespace System.Device.Gpio.Tests;
 
 public class ProtocolsTests
 {
-    [Fact]
+    // See #2339: This test is very frequently failing in CI, looks like a hardware issue.
+    [Fact(Skip = "Test is running unreliably")]
     [Trait("feature", "spi")]
     public void SPI_Mcp3008CanRead()
     {
@@ -98,6 +101,67 @@ public class ProtocolsTests
         i2cBus.Dispose();
         bme280.Dispose();
         bme280.Dispose();
+    }
+
+    [Fact]
+    [Trait("feature", "i2c")]
+    public void I2C_I2cBus_MultipleCreate()
+    {
+        I2cBus i2cBus = CreateI2cBusForBme280();
+
+        I2cDevice device1 = i2cBus.CreateDevice(Bmp280.DefaultI2cAddress);
+        device1.ReadByte();
+        i2cBus.RemoveDevice(Bmp280.DefaultI2cAddress);
+
+        I2cDevice device2 = i2cBus.CreateDevice(Bmp280.DefaultI2cAddress);
+        device2.ReadByte();
+    }
+
+    [Fact]
+    [Trait("feature", "i2c")]
+    public void I2C_I2cBus_MultipleCreateAndDispose()
+    {
+        I2cBus i2cBus = CreateI2cBusForBme280();
+
+        I2cDevice device1 = i2cBus.CreateDevice(Bmp280.DefaultI2cAddress);
+        device1.ReadByte();
+        device1.Dispose();
+
+        I2cDevice device2 = i2cBus.CreateDevice(Bmp280.DefaultI2cAddress);
+        device2.ReadByte();
+        device2.Dispose();
+    }
+
+    [Fact]
+    [Trait("feature", "i2c")]
+    public void I2C_I2cBus_Scan()
+    {
+        I2cBus i2cBus = CreateI2cBusForBme280();
+        List<int> addresses = i2cBus.PerformBusScan();
+        Assert.NotNull(addresses);
+    }
+
+    [Fact]
+    [Trait("feature", "i2c")]
+    public void I2C_I2cBus_ScanMultipleTimes()
+    {
+        I2cBus i2cBus = CreateI2cBusForBme280();
+
+        List<int> addresses1 = i2cBus.PerformBusScan();
+        Assert.NotNull(addresses1);
+
+        List<int> addresses2 = i2cBus.PerformBusScan();
+        Assert.NotNull(addresses2);
+    }
+
+    [Fact]
+    [Trait("feature", "i2c")]
+    public void I2C_I2cBus_HasBmp280Present()
+    {
+        I2cBus i2cBus = CreateI2cBusForBme280();
+        List<int> addresses = i2cBus.PerformBusScan();
+        Assert.NotEmpty(addresses);
+        Assert.Contains(Bmp280.DefaultI2cAddress, addresses);
     }
 
     [Fact]

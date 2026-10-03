@@ -259,6 +259,11 @@ namespace Iot.Device.Nmea0183
         public static TalkerId WeatherInstruments => new TalkerId('W', 'I');
 
         /// <summary>
+        /// Nmea2000 to Nmea0183 bridges from Yacht Devices use this talker by default.
+        /// </summary>
+        public static TalkerId YachtDevicesInterface => new TalkerId('Y', 'D');
+
+        /// <summary>
         /// Transducer
         /// </summary>
         /// <returns>TalkerId instance</returns>
@@ -290,13 +295,28 @@ namespace Iot.Device.Nmea0183
 
         /// <summary>
         /// AIS receiver - the only two known messages that are supported with this talker are AIVDM and AIVDO,
-        /// and they use a ! as sentence start character.
+        /// They use a ! as sentence start character and are always using "AI" as prefix, regardless of the actual source.
         /// </summary>
         public static TalkerId Ais => new TalkerId('A', 'I');
+
+        /// <summary>
+        /// Proprietary message, mostly for PCDIN sequences.
+        /// </summary>
+        public static TalkerId Proprietary => new TalkerId('P', 'C');
 
         /// <summary>
         /// Filter placeholder for any talker id
         /// </summary>
         public static TalkerId Any => new TalkerId('*', ' ');
+
+        /// <summary>
+        /// Seatalk messages wrapped up as NMEA data should always be prefixed $STALK
+        /// </summary>
+        public static TalkerId Seatalk => new TalkerId('S', 'T');
+
+        /// <summary>
+        /// Garmin proprietary sentences
+        /// </summary>
+        public static TalkerId GarminProprietary => new TalkerId('P', 'G');
     }
 }

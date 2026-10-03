@@ -9,11 +9,13 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Iot.Device.Graphics;
 using Iot.Device.Media;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Iot.Device.Graphics.SkiaSharpAdapter;
 
 namespace CameraIoT.Controllers
 {
@@ -67,8 +69,8 @@ namespace CameraIoT.Controllers
 
             HttpContext.Response.StatusCode = 200;
             HttpContext.Response.ContentType = "multipart/x-mixed-replace; boundary=--frame";
-            HttpContext.Response.Headers.Add("Connection", "Keep-Alive");
-            HttpContext.Response.Headers.Add("CacheControl", "no-cache");
+            HttpContext.Response.Headers["Connection"] = "Keep-Alive";
+            HttpContext.Response.Headers["CacheControl"] = "no-cache";
             _camera.NewImageReady += WriteBufferBody;
 
             try
@@ -120,8 +122,8 @@ namespace CameraIoT.Controllers
 
             HttpContext.Response.StatusCode = 200;
             HttpContext.Response.ContentType = "multipart/x-mixed-replace; boundary=--frame";
-            HttpContext.Response.Headers.Add("Connection", "Keep-Alive");
-            HttpContext.Response.Headers.Add("CacheControl", "no-cache");
+            HttpContext.Response.Headers["Connection"] = "Keep-Alive";
+            HttpContext.Response.Headers["CacheControl"] = "no-cache";
             _camera.NewImageReady += WriteModifiedBufferBody;
 
             try
@@ -153,14 +155,18 @@ namespace CameraIoT.Controllers
                 // using System.Drawing has serious performance implications in the context of video streaming from low powered devices,
                 // here is a 'simple' example of modifying the image, which will not be fast enough in most use cases.
                 using var stream = new MemoryStream(e.ImageBuffer.AsMemory().Slice(0, e.Length).ToArray());
-                Bitmap myBitmap = new Bitmap(stream);
-                Graphics g = Graphics.FromImage(myBitmap);
-                g.DrawString(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), new Font("Tahoma", 20), Brushes.White, new PointF(0, 0));
-                using var ms = new MemoryStream();
-                myBitmap.Save(ms, ImageFormat.Jpeg);
-                await HttpContext.Response.BodyWriter.WriteAsync(CreateHeader(e.Length));
-                await HttpContext.Response.BodyWriter.WriteAsync(ms.ToArray());
-                await HttpContext.Response.BodyWriter.WriteAsync(CreateFooter());
+                var myBitmap = BitmapImage.CreateFromStream(stream);
+                var g = myBitmap.GetDrawingApi();
+                g.DrawText(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"), "Tahoma", 20, Color.White, new Point(0, 0));
+                using (var ms = new MemoryStream())
+                {
+                    myBitmap.SaveToStream(ms, ImageFileType.Jpg);
+
+                    ms.Position = 0;
+                    await HttpContext.Response.BodyWriter.WriteAsync(CreateHeader(e.Length));
+                    await HttpContext.Response.BodyWriter.WriteAsync(ms.ToArray());
+                    await HttpContext.Response.BodyWriter.WriteAsync(CreateFooter());
+                }
             }
             catch (ObjectDisposedException)
             {

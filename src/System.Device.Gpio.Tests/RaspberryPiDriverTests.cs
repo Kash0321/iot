@@ -25,29 +25,13 @@ public class RaspberryPiDriverTests : GpioControllerTestBase
 
     protected override GpioDriver GetTestDriver() => new RaspberryPi3Driver();
 
-    protected override PinNumberingScheme GetTestNumberingScheme() => PinNumberingScheme.Logical;
-
-    private bool IsRaspi4()
-    {
-        if (File.Exists("/proc/device-tree/model"))
-        {
-            string model = File.ReadAllText("/proc/device-tree/model", Text.Encoding.ASCII);
-            if (model.Contains("Raspberry Pi 4") || model.Contains("Raspberry Pi Compute Module 4"))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     /// <summary>
     /// Tests for setting the pull up/pull down resistors on the Raspberry Pi (supported on Pi3 and Pi4, but with different techniques)
     /// </summary>
     [Fact]
     public void InputPullResistorsWork()
     {
-        using (GpioController controller = new GpioController(GetTestNumberingScheme(), GetTestDriver()))
+        using (GpioController controller = new GpioController(GetTestDriver()))
         {
             controller.OpenPin(OpenPin, PinMode.InputPullUp);
             Assert.Equal(PinValue.High, controller.Read(OpenPin));
@@ -71,7 +55,7 @@ public class RaspberryPiDriverTests : GpioControllerTestBase
     public void OpenPinDefaultsModeToLastModeIncludingPulls()
     {
         // This is only fully supported on the Pi4
-        using (GpioController controller = new GpioController(GetTestNumberingScheme(), GetTestDriver()))
+        using (GpioController controller = new GpioController(GetTestDriver()))
         {
             controller.OpenPin(OutputPin);
             controller.SetPinMode(OutputPin, PinMode.InputPullDown);
@@ -91,7 +75,7 @@ public class RaspberryPiDriverTests : GpioControllerTestBase
     [Fact]
     public void HighPulledPinDoesNotChangeToLowWhenChangedToOutput()
     {
-        using (GpioController controller = new GpioController(GetTestNumberingScheme(), GetTestDriver()))
+        using (GpioController controller = new GpioController(GetTestDriver()))
         {
             bool didTriggerToLow = false;
             int testPin = OutputPin;

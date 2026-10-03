@@ -52,7 +52,7 @@ namespace Iot.Device.Mcp23xxx.Tests
             {
                 Device = device;
                 ChipMock = chipMock;
-                Controller = new GpioController(PinNumberingScheme.Logical, Device);
+                Controller = new GpioController(Device);
             }
         }
 
@@ -185,6 +185,7 @@ namespace Iot.Device.Mcp23xxx.Tests
         {
             private Dictionary<int, PinValue> _pinValues = new Dictionary<int, PinValue>();
             private ConcurrentDictionary<int, PinMode> _pinModes = new ConcurrentDictionary<int, PinMode>();
+            private PinChangeEventHandler? _callback;
 
             protected override int PinCount => 10;
 
@@ -214,7 +215,9 @@ namespace Iot.Device.Mcp23xxx.Tests
                 return PinValue.Low;
             }
 
-            public void Read(Span<PinValuePair> pinValuePairs)
+            protected override void Toggle(int pinNumber) => Write(pinNumber, !Read(pinNumber));
+
+            protected override void Read(Span<PinValuePair> pinValuePairs)
             {
                 for (int i = 0; i < pinValuePairs.Length; i++)
                 {
@@ -241,13 +244,22 @@ namespace Iot.Device.Mcp23xxx.Tests
 
             protected override bool IsPinModeSupported(int pinNumber, PinMode mode) => true;
 
-            protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) => throw new NotImplementedException();
-
             protected override WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes, CancellationToken cancellationToken) => throw new NotImplementedException();
 
-            protected override void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback) => throw new NotImplementedException();
+            protected override void AddCallbackForPinValueChangedEvent(int pinNumber, PinEventTypes eventTypes, PinChangeEventHandler callback)
+            {
+                _callback = callback; // Keep it simple for this test class
+            }
 
-            protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback) => throw new NotImplementedException();
+            protected override void RemoveCallbackForPinValueChangedEvent(int pinNumber, PinChangeEventHandler callback)
+            {
+                _callback = null;
+            }
+
+            public void FireEvent(PinValueChangedEventArgs e)
+            {
+                _callback?.Invoke(this, e);
+            }
         }
     }
 }

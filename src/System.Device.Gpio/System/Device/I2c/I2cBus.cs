@@ -17,7 +17,7 @@ public abstract partial class I2cBus : IDisposable
     {
         if (Environment.OSVersion.Platform == PlatformID.Win32NT)
         {
-            return CreateWindows10I2cBus(busId);
+            throw new PlatformNotSupportedException("There's no default I2C driver for Windows available.");
         }
         else
         {
@@ -52,5 +52,18 @@ public abstract partial class I2cBus : IDisposable
     protected virtual void Dispose(bool disposing)
     {
         // Nothing to do in the base class.
+    }
+
+    /// <summary>
+    /// Query information about a component and it's children.
+    /// </summary>
+    /// <returns>A tree of <see cref="ComponentInformation"/> instances.</returns>
+    /// <remarks>
+    /// This method is currently reserved for debugging purposes. Its behavior its and signature are subject to change.
+    /// </remarks>
+    public virtual ComponentInformation QueryComponentInformation()
+    {
+        // We expect the description to be overriden, but to avoid adding new abstract members, we provide a default implementation
+        return new ComponentInformation(this, "I2C Bus device");
     }
 }

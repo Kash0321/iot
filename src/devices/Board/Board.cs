@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Device;
 using System.Device.Gpio;
 using System.Device.Gpio.Drivers;
 using System.Device.I2c;
@@ -27,11 +28,11 @@ namespace Iot.Device.Board
         private const string BaseBoardProductRegistryValue = @"SYSTEM\HardwareConfig\Current\BaseBoardProduct";
         private const string RaspberryPi2Product = "Raspberry Pi 2";
         private const string RaspberryPi3Product = "Raspberry Pi 3";
-        private const string HummingBoardProduct = "HummingBoard-Edge";
 
         private readonly object _pinReservationsLock;
         private readonly Dictionary<int, List<PinReservation>> _pinReservations;
         private readonly Dictionary<int, I2cBusManager> _i2cBuses;
+        private readonly List<IDeviceManager> _managers;
         private bool _initialized;
         private bool _disposed;
         private Dictionary<int, PinUsage> _knownUsages;
@@ -47,6 +48,7 @@ namespace Iot.Device.Board
         {
             _pinReservations = new Dictionary<int, List<PinReservation>>();
             _i2cBuses = new Dictionary<int, I2cBusManager>();
+            _managers = new List<IDeviceManager>();
             _knownUsages = new Dictionary<int, PinUsage>();
             _pinReservationsLock = new object();
             _initialized = false;
@@ -63,18 +65,6 @@ namespace Iot.Device.Board
         /// Any attempt to use it after this becomes true results in undefined behavior.
         /// </summary>
         protected bool Disposed => _disposed;
-
-        /// <summary>
-        /// The default pin numbering scheme for this board.
-        /// </summary>
-        public PinNumberingScheme DefaultPinNumberingScheme
-        {
-            get
-            {
-                // This is currently hardcoded to logical numbering, since it makes the API simpler and there are few really useful cases where you would need it otherwise.
-                return PinNumberingScheme.Logical;
-            }
-        }
 
         /// <summary>
         /// Reserves a pin for a specific usage. This is done automatically if a known interface (i.e. GpioController) is
@@ -123,6 +113,11 @@ namespace Iot.Device.Board
                     PinReservation rsv = new PinReservation(pinNumber, usage, owner);
                     reservations.Add(rsv);
                 }
+
+                if (owner is IDeviceManager manager)
+                {
+                    AddManager(manager);
+                }
             }
 
             ActivatePinMode(pinNumber, usage);
@@ -156,6 +151,7 @@ namespace Iot.Device.Board
                         }
 
                         _pinReservations.Remove(pinNumber);
+                        ClearOpenManagers();
                     }
                     else
                     {
@@ -174,6 +170,7 @@ namespace Iot.Device.Board
                         if (reservations.Count == 0)
                         {
                             _pinReservations.Remove(pinNumber);
+                            ClearOpenManagers();
                         }
                     }
                 }
@@ -231,12 +228,22 @@ namespace Iot.Device.Board
         /// <inheritdoc cref="IDisposable.Dispose"/>
         protected virtual void Dispose(bool disposing)
         {
-            foreach (var bus in _i2cBuses)
+            lock (_pinReservationsLock)
             {
-                bus.Value.Dispose();
+                foreach (var bus in _i2cBuses)
+                {
+                    bus.Value.Dispose();
+                }
+
+                foreach (var bus in _managers.ToList())
+                {
+                    bus.Dispose();
+                }
+
+                _i2cBuses.Clear();
+                _managers.Clear();
             }
 
-            _i2cBuses.Clear();
             _disposed = true;
         }
 
@@ -268,10 +275,13 @@ namespace Iot.Device.Board
         /// <summary>
         /// Return an instance of a <see cref="GpioController"/> for the current board
         /// </summary>
-        /// <returns>An instance of a GpioController. The controller used pin management to prevent reusing the same pin for different purposes
+        /// <returns>An instance of a GpioController. The controller uses pin management to prevent reusing the same pin for different purposes
         /// (or for purposes for which it is not suitable)</returns>
         /// <exception cref="NotSupportedException">Rare: No GPIO Controller was found for the current hardware. The default implementation will return
         /// a simulation interface if no hardware is available.</exception>
+        /// <remarks>
+        /// Derived classes should not normally override this method, but instead <see cref="TryCreateBestGpioDriver"/>.
+        /// </remarks>
         public virtual GpioController CreateGpioController()
         {
             Initialize();
@@ -283,7 +293,7 @@ namespace Iot.Device.Board
                 throw new NotSupportedException("No Gpio Driver for this board could be found.");
             }
 
-            return new ManagedGpioController(this, driver);
+            return AddManager(new ManagedGpioController(this, driver));
         }
 
         /// <summary>
@@ -380,13 +390,8 @@ namespace Iot.Device.Board
                 return new RaspberryPi3Driver();
             }
 
-            if (baseBoardProduct == HummingBoardProduct || baseBoardProduct.StartsWith($"{HummingBoardProduct} "))
-            {
-                return new HummingBoardDriver();
-            }
-
             // Default for Windows IoT Core on a non-specific device
-            return new Windows10Driver();
+            throw new PlatformNotSupportedException();
         }
 
         /// <summary>
@@ -410,7 +415,7 @@ namespace Iot.Device.Board
 
             bus = CreateI2cBusCore(busNumber, pinAssignment);
             _i2cBuses.Add(busNumber, bus);
-            return bus;
+            return AddManager(bus);
         }
 
         /// <summary>
@@ -472,9 +477,10 @@ namespace Iot.Device.Board
         /// This is called from the buses Dispose method, so do NOT call bus.Dispose here
         /// </summary>
         /// <param name="bus">The bus that's being closed</param>
-        internal void RemoveBus(I2cBusManager bus)
+        /// <returns>True if the bus was removed, false if it didn't exist</returns>
+        internal bool RemoveBus(I2cBusManager bus)
         {
-            _i2cBuses.Remove(bus.BusId);
+            return _i2cBuses.Remove(bus.BusId);
         }
 
         /// <summary>
@@ -483,11 +489,11 @@ namespace Iot.Device.Board
         /// <param name="connectionSettings">Connection parameters (contains bus number and CS pin number)</param>
         /// <param name="pinAssignment">The set of pins to use for SPI. The parameter can be null if the hardware requires a fixed mapping from
         /// pins to SPI for the given bus.</param>
-        /// <param name="pinNumberingScheme">The numbering scheme in which the <paramref name="pinAssignment"/> is given</param>
         /// <returns>An SPI device instance</returns>
-        public SpiDevice CreateSpiDevice(SpiConnectionSettings connectionSettings, int[] pinAssignment, PinNumberingScheme pinNumberingScheme)
+        public SpiDevice CreateSpiDevice(SpiConnectionSettings connectionSettings, int[] pinAssignment)
         {
             Initialize();
+
             if (pinAssignment == null)
             {
                 throw new ArgumentNullException(nameof(pinAssignment));
@@ -498,7 +504,8 @@ namespace Iot.Device.Board
                 throw new ArgumentException($"Invalid argument. Must provide three or four pins for SPI", nameof(pinAssignment));
             }
 
-            return new SpiDeviceManager(this, connectionSettings, pinAssignment, CreateSimpleSpiDevice);
+            var manager = new SpiDeviceManager(this, connectionSettings, pinAssignment, CreateSimpleSpiDevice);
+            return AddManager(manager);
         }
 
         /// <summary>
@@ -513,7 +520,7 @@ namespace Iot.Device.Board
             // Returns logical pin numbers for the selected bus (or an exception if using a bus number > 1, because that
             // requires specifying the pins)
             int[] pinAssignment = GetDefaultPinAssignmentForSpi(connectionSettings);
-            return CreateSpiDevice(connectionSettings, pinAssignment, PinNumberingScheme.Logical);
+            return CreateSpiDevice(connectionSettings, pinAssignment);
         }
 
         /// <summary>
@@ -534,13 +541,12 @@ namespace Iot.Device.Board
         /// <param name="frequency">Initial frequency</param>
         /// <param name="dutyCyclePercentage">Initial duty cycle</param>
         /// <param name="pin">The pin number for the pwm channel. Used if not hardwired (i.e. on the Raspi, it is possible to use different pins for the same PWM channel)</param>
-        /// <param name="pinNumberingScheme">The pin numbering scheme for the pin</param>
         /// <returns>A pwm channel instance</returns>
         public PwmChannel CreatePwmChannel(int chip, int channel, int frequency, double dutyCyclePercentage,
-            int pin, PinNumberingScheme pinNumberingScheme)
+            int pin)
         {
             Initialize();
-            return new PwmChannelManager(this, pin, chip, channel, frequency, dutyCyclePercentage, CreateSimplePwmChannel);
+            return AddManager(new PwmChannelManager(this, pin, chip, channel, frequency, dutyCyclePercentage, CreateSimplePwmChannel));
         }
 
         /// <summary>
@@ -559,7 +565,7 @@ namespace Iot.Device.Board
         {
             Initialize();
             int pin = GetDefaultPinAssignmentForPwm(chip, channel);
-            return CreatePwmChannel(chip, channel, frequency, dutyCyclePercentage, pin, PinNumberingScheme.Logical);
+            return CreatePwmChannel(chip, channel, frequency, dutyCyclePercentage, pin);
         }
 
         /// <summary>
@@ -636,6 +642,66 @@ namespace Iot.Device.Board
             }
 
             return board;
+        }
+
+        private void ClearOpenManagers()
+        {
+            lock (_pinReservationsLock)
+            {
+                for (int index = 0; index < _managers.Count; index++)
+                {
+                    IDeviceManager m = _managers[index];
+                    var managedPins = m.GetActiveManagedPins();
+                    bool isInUse = false;
+                    foreach (var pin in managedPins)
+                    {
+                        if (_pinReservations.ContainsKey(pin))
+                        {
+                            isInUse = true;
+                            break;
+                        }
+                    }
+
+                    if (!isInUse)
+                    {
+                        // Don't dispose the manager here - Would typically result in a recursive call to Dispose, as we're closing coming from closing pins
+                        _managers.RemoveAt(index);
+                        index--;
+                    }
+                }
+            }
+        }
+
+        private T AddManager<T>(T manager)
+            where T : IDeviceManager
+        {
+            lock (_pinReservationsLock)
+            {
+                if (!_managers.Contains(manager))
+                {
+                    _managers.Add(manager);
+                }
+            }
+
+            return manager;
+        }
+
+        /// <inheritdoc cref="GpioController.QueryComponentInformation"/>
+        public virtual ComponentInformation QueryComponentInformation()
+        {
+            ComponentInformation self = new ComponentInformation(this, "Generic Board");
+
+            var controller = CreateGpioController();
+
+            var controllerInfo = controller.QueryComponentInformation();
+            self.AddSubComponent(controllerInfo);
+
+            foreach (var e in _managers)
+            {
+                self.AddSubComponent(e.QueryComponentInformation());
+            }
+
+            return self;
         }
     }
 }

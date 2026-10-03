@@ -19,12 +19,6 @@ namespace Iot.Device.Board
         /// </summary>
         protected override int PinCount => 0;
 
-        /// <inheritdoc />
-        protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber)
-        {
-            return 0;
-        }
-
         /// <summary>
         /// There are no pins on this board, so this always throws an exception
         /// </summary>
@@ -61,6 +55,12 @@ namespace Iot.Device.Board
 
         /// <inheritdoc />
         protected override PinValue Read(int pinNumber)
+        {
+            throw new NotSupportedException("No such pin");
+        }
+
+        /// <inheritdoc />
+        protected override void Toggle(int pinNumber)
         {
             throw new NotSupportedException("No such pin");
         }

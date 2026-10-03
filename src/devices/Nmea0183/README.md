@@ -1,6 +1,17 @@
 ﻿# NMEA 0183 Protocol
 
-## Summary
+## Safety Note
+
+Never rely on electronic aids and their warnings alone for safe navigation. The International Regulations for Preventing Collisions at Sea (COLREG)
+states in Rule 5: „Every vessel shall **at all times** maintain a proper look-out by **sight and hearing** as well as by all available means appropriate
+in the prevailing circumstances and conditions so as to make a full appraisal of the situation and of the risk of collision.“ It is therefore the
+skippers responsibility to maintain proper watchkeeping with all means available.
+
+AIS is a great aid in avoiding collisions and foreseeing dangerous close encounters with other vessels, but it can never act as sole source
+of information. There's no guarantee for it's seamless operation and there are still a large number of smaller ships that are not equipped with AIS
+transponders.
+
+## Summary for NMEA support
 
 NMEA stands for `National Marine Electronics Associations`.
 
@@ -14,7 +25,7 @@ most recent devices support configuring higher baud rates. Since RS-232 only sup
 required to combine multiple data sources. Chart plotters for NMEA 0183 have several inputs for different sensors.
 
 NMEA 0183 has been superseeded by NMEA 2000, which uses a CAN-Bus protocol and hardware layer and can therefore run a large number of sensors on a single cable.
-Since NMEA 0183 is much simpler to parse and does not require specific electronic components, it is still in wide use. Bi-directional convertes
+Since NMEA 0183 is much simpler to parse and does not require specific electronic components, it is still in wide use. Bi-directional converters
 from NMEA 0183 to NMEA 2000 are available from different vendors.
 
 In NMEA 0183 a device is either a talker or a listener. There are multiple types of sentences (or messages) which can be sent or received.
@@ -22,6 +33,7 @@ Each message has a talker identifier (see `TalkerIdentifier`), sentence identifi
 
 The following sentence ids are currently supported:
 
+- AIVDM/AIVDO: AIS messages (see below)
 - BOD: Bearing origin to destination
 - BWC: Bearing and distance to waypoint
 - DBS: Depth below surface
@@ -34,6 +46,7 @@ The following sentence ids are currently supported:
 - MDA: Meterological information
 - MWD: Wind direction absolute
 - MWV: Wind Speed and angle (both true and apparent)
+- PCDIN: (partial) Used to wrap NMEA2000 engine parameter sets. Message types 0x01F200, 0x01F201, 0x01F211
 - RMB: Recommended navigation to destination (for autopilot)
 - RMC: Recommended minimum navigation sentence
 - RPM: Engine revolutions
@@ -49,8 +62,27 @@ All supported messages can both be parsed as well as sent out. Therefore it's po
 send temperature data from an attached DHT11 sensor back to the network.
 
 A `MessageRouter` class is available that can be used to route messages between different interfaces (the Raspberry Pi 4 supports up to
-6 RS-232 interfaces, not including USB-to-Serial adapters).
-Unsupported messages can still be routed around, e.g. AIS data (AIVDM messages)
+6 RS-232 interfaces, not including USB-to-Serial adapters). Unsupported messages can still be routed around as Raw messages. AIS Messages (AIVDM and AIVDO) are also routed as raw messages, but can be decoded using the separate `AisManager` class.
+
+## AIS Decoding
+
+AIS (Automatic Identification System) is a System that automatically provides information about nearby ships by radio. All larger ships must be equipped with a transceiver (sender) that sends the own vessel's position regularly to all nearby vessels. Smaller ships such as yachts can be equipped as well, and many sea-going yachts are, because the system adds a high level of security. All vessels that are equipped with a receiver for this AIS data (typically embedded into a VHF radio) can see the position and speed, as well as the names of other vessels directly on a display or the chart plotter.
+
+The `AisManager` class decodes AIS messages encoded in AIVDM/AIVDO sentences. Just forward the entire data stream to an instance of it (or use the `MessageRouter` for this purpose).
+
+```csharp
+
+_manager = new AisManager("AIS", 12345, "MyVessel");
+using NmeaTcpClient client = new NmeaTcpClient("TcpClient", "localhost");
+client.OnNewSequence += (source, msg) =>
+{
+    _manager.SendSentence(source, msg);
+};
+
+client.StartDecode();
+// ...
+var shipsInView = _manager.GetSpecificTargets<Ship>(); // Get the list of currently visible ships.
+```
 
 ## References
 
@@ -229,7 +261,10 @@ Filter rules are used to tell the router which messages from which source need t
 ## A note on the use of serial ports on the Raspberry Pi
 
 The Raspberry Pi 4 has up to 6 UART interfaces that can be enabled. UART0 on GPIO pins 14 and 15 is enabled by default, the others can be
-enabled using overlays configured in `/boot/config.txt`. The following entries add UARTS 2 and 3 on GPIO Pins 0/1 and 4/5 respectively:
+enabled using overlays configured in `/boot/firmware/config.txt`. The following entries add UARTS 2 and 3 on GPIO Pins 0/1 and 4/5 respectively:
+
+> [!Note]
+> Prior to *Bookworm*, Raspberry Pi OS stored the boot partition at `/boot/`. Since Bookworm, the boot partition is located at `/boot/firmware/`. Adjust the previous line to be `sudo nano /boot/firmware/config.txt` if you have an older OS version.
 
 ```text
 enable_uart=1

@@ -40,7 +40,7 @@ namespace Iot.Device.Nmea0183.Sentences
         }
 
         /// <summary>
-        /// Date and time message (ZDA). This should not normally need the last time as argument, because it defines it.
+        /// Constructor that decodes a message.
         /// </summary>
         public DepthBelowSurface(TalkerId talkerId, IEnumerable<string> fields, DateTimeOffset time)
             : base(talkerId, Id, time)
@@ -73,16 +73,6 @@ namespace Iot.Device.Nmea0183.Sentences
         /// Cross track distance, meters
         /// </summary>
         public Length Depth
-        {
-            get;
-            private set;
-        }
-
-        /// <summary>
-        /// Direction to steer.
-        /// True: Left, False: Right
-        /// </summary>
-        public bool Left
         {
             get;
             private set;

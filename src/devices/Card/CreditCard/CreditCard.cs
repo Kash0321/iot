@@ -5,6 +5,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using Iot.Device.Common;
 using Microsoft.Extensions.Logging;
@@ -454,8 +455,7 @@ namespace Iot.Device.Card.CreditCardProcessing
                                 // 0x9F37 Unpredictable number
                                 else if (dol.TagNumber == 0x9F37)
                                 {
-                                    var rand = new Random();
-                                    rand.NextBytes(toSend.Slice(index, dol.Data[0]));
+                                    RandomNumberGenerator.Fill(toSend.Slice(index, dol.Data[0]));
                                 }
 
                                 // Currency
@@ -735,7 +735,7 @@ namespace Iot.Device.Card.CreditCardProcessing
 
         private int ReadFromCard(byte target, ReadOnlySpan<byte> toSend, Span<byte> received)
         {
-            var ret = _nfc.Transceive(_target, toSend, received);
+            var ret = _nfc.Transceive(_target, toSend, received, NfcProtocol.Iso14443_4);
             if (ret >= TailerSize)
             {
                 if (ret == TailerSize)
@@ -748,7 +748,7 @@ namespace Iot.Device.Card.CreditCardProcessing
                         Span<byte> toGet = stackalloc byte[5];
                         ApduCommands.GetBytesToRead.CopyTo(toGet);
                         toGet[4] = err.CorrectLegnthOrBytesAvailable;
-                        ret = _nfc.Transceive(_target, toGet, received);
+                        ret = _nfc.Transceive(_target, toGet, received, NfcProtocol.Iso14443_4);
                     }
                 }
             }

@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 // Our predefined handles are:
 // 1-0xBFFF File handles
 // 0xCEED Standard input
-// 0xCEED Standard output
+// 0xCEEE Standard output
 // 0xCEEF Standard error (see also FirmataIlExecutor.h)
 // 0xF000-0xFFFF Network handles
 namespace ArduinoCsCompiler.Runtime
@@ -51,13 +51,13 @@ namespace ArduinoCsCompiler.Runtime
             }
 
             [ArduinoImplementation("Kernel32_WriteConsole")]
-            internal static unsafe Int32 WriteConsole(System.IntPtr handle, System.Byte* bytes, System.Int32 numBytesToWrite, ref System.Int32 numBytesWritten, System.IntPtr mustBeZero)
+            internal static unsafe bool WriteConsole(System.IntPtr handle, System.Byte* bytes, System.Int32 numBytesToWrite, ref System.Int32 numBytesWritten, System.IntPtr mustBeZero)
             {
-                return 0;
+                return true;
             }
 
-            [ArduinoImplementation("Kernel32_WideCharToMultiByte")]
-            internal static unsafe Int32 WideCharToMultiByte(System.UInt32 CodePage, System.UInt32 dwFlags, System.Char* lpWideCharStr, System.Int32 cchWideChar, System.Byte* lpMultiByteStr, System.Int32 cbMultiByte, System.IntPtr lpDefaultChar, System.IntPtr lpUsedDefaultChar)
+            [ArduinoImplementation("Kernel32_WideCharToMultiByte", CompareByParameterNames = true)]
+            public static unsafe Int32 WideCharToMultiByte(System.UInt32 CodePage, System.UInt32 dwFlags, System.Char* lpWideCharStr, System.Int32 cchWideChar, System.Byte* lpMultiByteStr, System.Int32 cbMultiByte, System.IntPtr lpDefaultChar, System.IntPtr lpUsedDefaultChar)
             {
                 return 0;
             }

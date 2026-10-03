@@ -71,7 +71,7 @@ namespace Iot.Device.Common
         /// <param name="currentTrack">First angle, actual direction</param>
         /// <param name="destinationTrack">Second angle, desired direction</param>
         /// <returns>The normalized result of <paramref name="currentTrack"/>-<paramref name="destinationTrack"/>. The value is negative if
-        /// the current track is to port (left) of the the desired track and positive otherwise</returns>
+        /// the current track is to port (left) of the desired track and positive otherwise</returns>
         public static Angle Difference(Angle currentTrack, Angle destinationTrack)
         {
             double val = currentTrack.Radians - destinationTrack.Radians;
@@ -155,6 +155,35 @@ namespace Iot.Device.Common
             // cos == 0
             result = default;
             return false;
+        }
+
+        /// <summary>
+        /// Converts an angle in aviatic definition to mathematic definition.
+        /// Aviatic angles are in degrees, where 0 degrees is north, counting clockwise, mathematic angles
+        /// are in radians, starting east and going counterclockwise.
+        /// </summary>
+        /// <param name="input">Aviatic angle, default unit degrees</param>
+        /// <returns>Mathematic angle, default unit radians</returns>
+        public static Angle AviaticToRadians(this Angle input)
+        {
+            double ret = ((-input.Degrees) + 90.0);
+            ret = ret * Math.PI / 180.0;
+
+            return Angle.FromRadians(ret).Normalize(true);
+        }
+
+        /// <summary>
+        /// Convert angle from mathematic definition to aviatic.
+        /// See also AviaticToRadians()
+        /// </summary>
+        /// <param name="input">Mathematic value, typically in radians</param>
+        /// <returns>Aviatic value in degrees</returns>
+        public static Angle RadiansToAviatic(this Angle input)
+        {
+            double ret = input.Radians * 180.0 / Math.PI;
+            ret = ((-ret) + 90.0);
+
+            return Angle.FromDegrees(ret).Normalize(true);
         }
     }
 }

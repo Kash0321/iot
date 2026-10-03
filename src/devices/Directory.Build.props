@@ -1,12 +1,11 @@
 <Project>
-  <Import Project="../../eng/Compilers.props" />
-  <Import Project="../../eng/Versions.props" />
-  <Import Project="../../eng/Analyzers.props" />
-  <Import Project="../../eng/Versions.external.props" />
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+  
   <PropertyGroup>
     <!-- Most projects should use this value to build for all possible target frameworks -->
-    <DefaultBindingTfms>net6.0;netcoreapp3.1;netstandard2.0;</DefaultBindingTfms>
-    <DefaultSampleTfms>net6.0</DefaultSampleTfms>
+    <DefaultBindingTfms>net8.0</DefaultBindingTfms>
+    <DefaultSampleTfms>net8.0</DefaultSampleTfms>
+    <DefaultTestTfms>net8.0</DefaultTestTfms>
     <NoWarn>$(NoWarn);CS8321</NoWarn>
     <DeterministicSourcePaths>false</DeterministicSourcePaths>
     <IsPackable>false</IsPackable>
@@ -15,7 +14,6 @@
     <SystemDeviceModelPath>$(MSBuildThisFileDirectory)$(SystemDeviceModelProjectName)/$(SystemDeviceModelProjectName).csproj</SystemDeviceModelPath>
     <CommonProjectName>Common</CommonProjectName>
     <CommonProjectPath>$(MSBuildThisFileDirectory)$(CommonProjectName)/$(CommonProjectName).csproj</CommonProjectPath>
-    <LangVersion>9</LangVersion>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 

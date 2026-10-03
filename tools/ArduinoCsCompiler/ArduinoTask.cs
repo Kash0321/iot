@@ -26,6 +26,7 @@ namespace ArduinoCsCompiler
             _collectedValues = new ConcurrentQueue<(MethodState, object[])>();
             _dataAdded = new AutoResetEvent(false);
             TaskId = taskId;
+            TaskMessages = Array.Empty<string>();
         }
 
         public MicroCompiler Compiler { get; }
@@ -48,6 +49,12 @@ namespace ArduinoCsCompiler
             {
                 return _collectedValues.Any();
             }
+        }
+
+        public string[] TaskMessages
+        {
+            get;
+            private set;
         }
 
         public void AddData(MethodState state, object[] args)
@@ -119,6 +126,15 @@ namespace ArduinoCsCompiler
                         textualStackTrace = Environment.NewLine + Debugger.PrintStack(stack);
                     }
 
+                    if (TaskMessages.Any())
+                    {
+                        textualStackTrace += Environment.NewLine + "Last trace messages: ";
+                        foreach (var msg in TaskMessages)
+                        {
+                            textualStackTrace += Environment.NewLine + msg;
+                        }
+                    }
+
                     if (sysEx == SystemException.InvalidOpCode)
                     {
                         string instrName = OpCodeDefinitions.OpcodeDef[targetToken].Name;
@@ -138,7 +154,7 @@ namespace ArduinoCsCompiler
                         switch (sysEx)
                         {
                             case SystemException.MissingMethod:
-                                ex = new MissingMethodException(resolved.MemberInfoSignature() + " " + textualStackTrace);
+                                ex = new MissingMethodException(resolved.MemberInfoSignature() + $" (Token 0x{targetToken:X})" + textualStackTrace);
                                 break;
                             case SystemException.NullReference:
                                 ex = new NullReferenceException($"NullReferenceException in {resolved.MemberInfoSignature()} " + textualStackTrace);
@@ -263,6 +279,15 @@ namespace ArduinoCsCompiler
             var task = WaitForResult(CancellationToken.None);
             task.Wait();
             return task.Result;
+        }
+
+        /// <summary>
+        /// Stores the last log messages in the task object, to be able to print them with the result
+        /// </summary>
+        /// <param name="messages">List of messages</param>
+        public void AddLastLogs(string[] messages)
+        {
+            TaskMessages = messages;
         }
     }
 }

@@ -36,6 +36,12 @@ namespace ArduinoCsCompiler.Runtime
             return 0;
         }
 
+        [ArduinoImplementation]
+        public static int TryGetHashCode(object? obj)
+        {
+            return GetHashCode(obj);
+        }
+
         [ArduinoImplementation(CompareByParameterNames = true)]
         public static bool IsPrimitiveType(CorElementType et)
         {
@@ -43,6 +49,7 @@ namespace ArduinoCsCompiler.Runtime
             return ((1 << (int)et) & 0b_0011_0000_0000_0011_1111_1111_1100) != 0;
         }
 
+        [ArduinoImplementation]
         public static bool IsReferenceOrContainsReferences<T>()
         {
             return IsReferenceOrContainsReferencesCore(typeof(T));
@@ -57,21 +64,30 @@ namespace ArduinoCsCompiler.Runtime
         /// <summary>
         /// This uses an implementation in the EE to get rid of all type tests (and all possible casts)
         /// </summary>
-        [ArduinoImplementation("RuntimeHelpersEnumEquals")]
+        [ArduinoImplementation("RuntimeHelpersEnumEquals", IgnoreGenericTypes = true)]
         public static bool EnumEquals<T>(T x, T y)
             where T : struct, Enum
         {
-            return x.Equals(y);
+            // return x.Equals(y);
+            throw new NotImplementedException();
         }
 
-        [ArduinoImplementation("RuntimeHelpersEnumCompareTo")]
+        [ArduinoImplementation("RuntimeHelpersEnumEqualsInternal")]
+        public static bool EnumEqualsInternal(object x, object y)
+        {
+            throw new NotSupportedException();
+        }
+
+        [ArduinoImplementation("RuntimeHelpersEnumCompareTo", IgnoreGenericTypes = true)]
         internal static int EnumCompareTo<T>(T x, T y)
             where T : struct, Enum
         {
-            return x.CompareTo((object)y);
+            // return x.CompareTo((object)y);
+            throw new NotImplementedException();
         }
 
-        internal static bool IsBitwiseEquatable<T>()
+        [ArduinoImplementation]
+        public static bool IsBitwiseEquatable<T>()
         {
             return IsBitwiseEquatableCore(typeof(T));
         }
@@ -145,6 +161,24 @@ namespace ArduinoCsCompiler.Runtime
         public static System.Boolean TryEnsureSufficientExecutionStack()
         {
             return true;
+        }
+
+        [ArduinoImplementation]
+        public static unsafe System.ReadOnlySpan<T> CreateSpan<T>(RuntimeFieldHandle handle)
+        {
+            return new ReadOnlySpan<T>(GetSpanDataFrom(handle, typeof(T), out int length), length);
+        }
+
+        [ArduinoImplementation("RuntimeHelpersGetSpanDataFrom")]
+        public static unsafe void* GetSpanDataFrom(RuntimeFieldHandle handle, Type type, out int length)
+        {
+            throw new NotImplementedException();
+        }
+
+        [ArduinoImplementation]
+        public static bool IsKnownConstant(Char t)
+        {
+            return false;
         }
     }
 }

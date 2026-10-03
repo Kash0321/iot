@@ -9,8 +9,8 @@ SPI and I2C can be used to communicate with the device (only I2C implemented so 
 The implementation supports the following devices:
 
 - BMP280 temperature and barometric pressure sensor ([Datasheet](https://cdn-shop.adafruit.com/datasheets/BST-BMP280-DS001-11.pdf))
-- BME280 temperature, barometric pressure and humidity sensor ([Datasheet](https://ae-bst.resource.bosch.com/media/_tech/media/datasheets/BST-BME280-DS002.pdf))
-- BME680 temperature, barometric pressure, humidity and VOC gas sensor ([Datasheet](https://ae-bst.resource.bosch.com/media/_tech/media/datasheets/BST-BME680-DS001.pdf))
+- BME280 temperature, barometric pressure and humidity sensor ([Datasheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme280-ds002.pdf))
+- BME680 temperature, barometric pressure, humidity and VOC gas sensor ([Datasheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme680-ds001.pdf))
 
 ## Usage
 
@@ -97,17 +97,17 @@ The following fritzing diagram illustrates one way to wire up the BMP280 with a 
 
 General:
 
-| Bmp280 | Raspberry |
-|--------|:---------:|
-|Vin| Power pin|
-|GND| Ground|
+| Bmp280 | Raspberry  |
+|--------|:----------:|
+| Vin    | Power pin  |
+| GND    | Ground     |
 
 I2C:
 
-| Bmp280 | Raspberry |
-|--------|:---------:|
-|SCK| I2C clock pin|
-|SDI| I2C data pin|
+| Bmp280 | Raspberry      |
+|--------|:--------------:|
+| SCK    | I2C clock pin  |
+| SDI    | I2C data pin   |
 
 ### Connection Type
 

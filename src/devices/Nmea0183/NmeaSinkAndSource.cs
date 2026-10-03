@@ -42,6 +42,8 @@ namespace Iot.Device.Nmea0183
         protected NmeaSinkAndSource(string interfaceName)
         {
             InterfaceName = interfaceName;
+            LogReceive = true;
+            LogSend = false;
         }
 
         /// <summary>
@@ -53,6 +55,24 @@ namespace Iot.Device.Nmea0183
         }
 
         /// <summary>
+        /// True (the default) to log any input from this interface.
+        /// </summary>
+        public bool LogReceive
+        {
+            get;
+            set;
+        }
+
+        /// <summary>
+        /// True to log any sends on this interface. The default is false.
+        /// </summary>
+        public bool LogSend
+        {
+            get;
+            set;
+        }
+
+        /// <summary>
         /// Start receiving messages from this interface.
         /// An implementation should open streams, connect to sockets or create receiver threads, as appropriate.
         /// </summary>
@@ -60,7 +80,7 @@ namespace Iot.Device.Nmea0183
 
         /// <summary>
         /// Send the message to the device.
-        /// For an implementation, this is the input data!
+        /// From the implementation side, this is where the input data comes in (e.g. from the message dispatcher)
         /// </summary>
         /// <param name="source">Source of message</param>
         /// <param name="sentence">Sentence to send</param>
@@ -112,14 +132,24 @@ namespace Iot.Device.Nmea0183
         }
 
         /// <summary>
-        /// Forwards the given sentence to listeners, as needed.
+        /// Forwards the given sentence to listeners, as needed. Use the current instance as source.
         /// </summary>
         /// <param name="typedSequence">The sentences to process</param>
         protected virtual void DispatchSentenceEvents(NmeaSentence? typedSequence)
         {
+            DispatchSentenceEvents(this, typedSequence);
+        }
+
+        /// <summary>
+        /// Forwards the given sentence to listeners, as needed.
+        /// </summary>
+        /// <param name="source">The source from which this event comes (if forwarded)</param>
+        /// <param name="typedSequence">The sentences to process</param>
+        protected virtual void DispatchSentenceEvents(NmeaSinkAndSource source, NmeaSentence? typedSequence)
+        {
             if (typedSequence != null)
             {
-                OnNewSequence?.Invoke(this, typedSequence);
+                OnNewSequence?.Invoke(source, typedSequence);
             }
 
             if (typedSequence is RecommendedMinimumNavigationInformation rmc && rmc.Valid)

@@ -35,8 +35,7 @@ namespace Iot.Device.Nmea0183
         private StreamReader _reader;
         private Raw8BitEncoding _encoding;
         private Thread? _sendQueueThread;
-        private ConcurrentQueue<NmeaSentence> _outQueue;
-        private AutoResetEvent _outEvent;
+        private BlockingCollection<NmeaSentence> _outQueue;
         private Exception? _ioExceptionOnSend;
         private DateTimeOffset _lastPacketTime;
 
@@ -56,7 +55,6 @@ namespace Iot.Device.Nmea0183
             _dataSink = dataSink;
             _lock = new object();
             _outQueue = new();
-            _outEvent = new AutoResetEvent(false);
             ExclusiveTalkerId = TalkerId.Any;
             _ioExceptionOnSend = null;
             SuppressOutdatedMessages = true;
@@ -92,6 +90,15 @@ namespace Iot.Device.Nmea0183
         /// in massive message delivery delays and eventually a low memory situation.
         /// </remarks>
         public bool SuppressOutdatedMessages
+        {
+            get;
+            set;
+        }
+
+        /// <summary>
+        /// If true, the parser also accepts sentences in a log format (prefixed with a date and separated by |)
+        /// </summary>
+        public bool SupportLogReading
         {
             get;
             set;
@@ -138,6 +145,19 @@ namespace Iot.Device.Nmea0183
                     FireOnParserError(x.Message, NmeaError.PortClosed);
                     continue;
                 }
+                catch (OperationCanceledException x)
+                {
+                    FireOnParserError(x.Message, NmeaError.PortClosed);
+                    continue;
+                }
+                catch (InvalidOperationException x)
+                {
+                    // NetworkStream throws this (rather than ObjectDisposedException) when the underlying
+                    // stream has been disposed and is no longer readable (CanRead == false). This can
+                    // happen during StopDecode while the parser thread is blocked inside ReadLine().
+                    FireOnParserError(x.Message, NmeaError.PortClosed);
+                    continue;
+                }
 
                 if (currentLine == null)
                 {
@@ -148,13 +168,28 @@ namespace Iot.Device.Nmea0183
                             FireOnParserError("End of stream detected.", NmeaError.PortClosed);
                         }
                     }
-                    catch (ObjectDisposedException)
+                    catch (Exception x) when (x is IOException || x is ObjectDisposedException || x is InvalidOperationException)
                     {
                         // Ignore here (already reported above)
                     }
 
-                    Thread.Sleep(10); // to prevent busy-waiting
                     continue; // Probably because the stream was closed.
+                }
+
+                if (SupportLogReading)
+                {
+                    if (currentLine.Contains("|"))
+                    {
+                        var splits = currentLine.Split(new char[]
+                        {
+                                '|'
+                        }, StringSplitOptions.None);
+                        if (splits.Length >= 3)
+                        {
+                            // The first column is the date, the second column the (original) data source
+                            currentLine = splits[2]; // Raw message
+                        }
+                    }
                 }
 
                 TalkerSentence? sentence = TalkerSentence.FromSentenceString(currentLine, ExclusiveTalkerId, out var error);
@@ -191,7 +226,7 @@ namespace Iot.Device.Nmea0183
         {
             while (_cancellationTokenSource != null && !_cancellationTokenSource.IsCancellationRequested)
             {
-                if (_outQueue.TryDequeue(out var sentenceToSend))
+                if (_outQueue.TryTake(out var sentenceToSend, TimeSpan.FromSeconds(10)))
                 {
                     if (sentenceToSend.ReplacesOlderInstance && SuppressOutdatedMessages)
                     {
@@ -202,6 +237,11 @@ namespace Iot.Device.Nmea0183
                         {
                             continue;
                         }
+                    }
+
+                    if (sentenceToSend.Valid == false)
+                    {
+                        continue;
                     }
 
                     TalkerSentence ts = new TalkerSentence(sentenceToSend);
@@ -222,11 +262,6 @@ namespace Iot.Device.Nmea0183
                         // Probably going to close the port any moment
                     }
                 }
-
-                if (_outQueue.IsEmpty)
-                {
-                    WaitHandle.WaitAny(new WaitHandle[] { _outEvent, _cancellationTokenSource.Token.WaitHandle });
-                }
             }
         }
 
@@ -239,8 +274,15 @@ namespace Iot.Device.Nmea0183
                 throw _ioExceptionOnSend;
             }
 
-            _outQueue.Enqueue(sentence);
-            _outEvent?.Set();
+            try
+            {
+                _outQueue.Add(sentence);
+            }
+            catch (InvalidOperationException x)
+            {
+                // the queue is closed
+                FireOnParserError($"{x.Message}", NmeaError.PortClosed);
+            }
         }
 
         /// <inheritdoc />
@@ -250,6 +292,7 @@ namespace Iot.Device.Nmea0183
             {
                 if (_parserThread != null && _parserThread.IsAlive && _cancellationTokenSource != null)
                 {
+                    _outQueue.CompleteAdding();
                     _cancellationTokenSource.Cancel();
                     _dataSource.Dispose();
                     _dataSink?.Dispose();
@@ -258,14 +301,12 @@ namespace Iot.Device.Nmea0183
 
                     _sendQueueThread?.Join();
                     _cancellationTokenSource = null;
-                    _outEvent.Dispose();
 
                     _parserThread = null;
                     _dataSource = null!;
                     _dataSink = null!;
                     _reader = null!;
                     _sendQueueThread = null;
-                    _outEvent = null!;
                 }
             }
         }

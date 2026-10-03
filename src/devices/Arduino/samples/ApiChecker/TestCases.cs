@@ -6,7 +6,9 @@ using System.Collections.Generic;
 using System.Device.Gpio;
 using System.Device.I2c;
 using System.Device.Spi;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -27,6 +29,7 @@ namespace Iot.Device.Arduino.Sample
         private readonly ArduinoBoard _board;
         private int _ledPin = 13;
         private int _buttonPin = 2;
+        private int _analogInputChannel = 1;
         private int _lowestI2cAddress = 0x3;
         private int _highestI2cAddress = 0x77;
 
@@ -57,55 +60,26 @@ namespace Iot.Device.Arduino.Sample
             while (loop);
         }
 
-        private static void TestAnalogCallback(ArduinoBoard board)
+        private static int GetAnalogPin(ArduinoBoard board, int analogChannel)
         {
-            int analogPin = GetAnalogPin1(board);
-            var analogController = board.CreateAnalogController(0);
-            board.SetAnalogPinSamplingInterval(TimeSpan.FromMilliseconds(10));
-            var pin = analogController.OpenPin(analogPin);
-            pin.EnableAnalogValueChangedEvent(null, 0);
-
-            pin.ValueChanged += (sender, args) =>
-            {
-                if (args.PinNumber == analogPin)
-                {
-                    Console.WriteLine($"New voltage: {args.Value}.");
-                }
-            };
-
-            Console.WriteLine("Waiting for changes on the analog input");
-            while (!Console.KeyAvailable)
-            {
-                // Nothing to do
-                Thread.Sleep(100);
-            }
-
-            Console.ReadKey();
-            pin.DisableAnalogValueChangedEvent();
-            pin.Dispose();
-            analogController.Dispose();
-        }
-
-        private static int GetAnalogPin1(ArduinoBoard board)
-        {
-            int analogPin = 15;
+            int analogPin;
             foreach (var pin in board.SupportedPinConfigurations)
             {
-                if (pin.AnalogPinNumber == 1)
+                if (pin.AnalogPinNumber == analogChannel)
                 {
                     analogPin = pin.Pin;
-                    break;
+                    Console.WriteLine($"Using pin for A{analogChannel}: {analogPin}");
+                    return analogPin;
                 }
             }
 
-            return analogPin;
+            return -1;
         }
 
         private static void TestI2cBmp280(ArduinoBoard board)
         {
-            var device = board.CreateI2cDevice(new I2cConnectionSettings(0, Bmp280.DefaultI2cAddress));
-
-            var bmp = new Bmp280(device);
+            using var device = board.CreateI2cDevice(new I2cConnectionSettings(0, Bmp280.SecondaryI2cAddress));
+            using var bmp = new Bmp280(device);
             bmp.StandbyTime = StandbyTime.Ms250;
             bmp.SetPowerMode(Bmx280PowerMode.Normal);
             Console.WriteLine("Device open");
@@ -117,8 +91,6 @@ namespace Iot.Device.Arduino.Sample
                 Thread.Sleep(100);
             }
 
-            bmp.Dispose();
-            device.Dispose();
             Console.ReadKey();
             Console.WriteLine();
         }
@@ -230,7 +202,7 @@ namespace Iot.Device.Arduino.Sample
             Console.WriteLine($" 4 Run event wait test event on GPIO{_buttonPin} on Falling and Rising");
             Console.WriteLine($" 5 Run callback event test on GPIO{_buttonPin}");
             Console.WriteLine($" 6 Run PWM test with a LED dimming on GPIO{_ledPin} port");
-            Console.WriteLine(" 7 Blink the LED according to the input on A1");
+            Console.WriteLine($" 7 Blink the LED according to the input on A{_analogInputChannel}");
             Console.WriteLine(" 8 Read analog channel as fast as possible");
             Console.WriteLine(" 9 Run SPI tests with an MCP3008 (experimental)");
             Console.WriteLine(" 0 Detect all devices on the I2C bus");
@@ -238,6 +210,7 @@ namespace Iot.Device.Arduino.Sample
             Console.WriteLine(" A Color fade an RGB led on 3 PWM channels");
             Console.WriteLine(" B Run I2C tests with a BME680");
             Console.WriteLine(" F Measure frequency on a GPIO Pin (experimental)");
+            Console.WriteLine($" S Send board to sleep (wake up with interrupt on {_buttonPin})");
             Console.WriteLine();
             Console.WriteLine(" C Configure pins for tests");
             Console.WriteLine(" I Get board information");
@@ -245,116 +218,177 @@ namespace Iot.Device.Arduino.Sample
             var key = Console.ReadKey();
             Console.WriteLine();
 
-            switch (key.KeyChar)
+            try
             {
-                case '1':
-                    TestI2cBmp280(_board);
-                    break;
-                case '2':
-                    TestGpio();
-                    break;
-                case '3':
-                    TestInput();
-                    break;
-                case '4':
-                    TestEventsDirectWait();
-                    break;
-                case '5':
-                    TestEventsCallback();
-                    break;
-                case '6':
-                    TestPwm();
-                    break;
-                case '7':
-                    TestAnalogIn();
-                    break;
-                case '8':
-                    TestAnalogCallback(_board);
-                    break;
-                case '9':
-                    TestSpi(_board);
-                    break;
-                case '0':
-                    ScanDeviceAddressesOnI2cBus(_board);
-                    break;
-                case 'h':
-                case 'H':
-                    TestDht(_board);
-                    break;
-                case 'b':
-                case 'B':
-                    TestI2cBme680(_board);
-                    break;
-                case 'f':
-                case 'F':
-                    TestFrequency(_board);
-                    break;
-                case 'a':
-                case 'A':
-                    {
-                        var test = new RgbLedTest(_board);
-                        test.DoTest();
-                    }
-
-                    break;
-                case 'c':
-                case 'C':
-                    {
-                        Console.WriteLine();
-                        Console.Write("Which pin to use for the LED? ");
-                        var input = Console.ReadLine();
-                        if (int.TryParse(input, NumberStyles.Integer, CultureInfo.CurrentCulture, out int led))
+                switch (key.KeyChar)
+                {
+                    case '1':
+                        TestI2cBmp280(_board);
+                        break;
+                    case '2':
+                        TestGpio();
+                        break;
+                    case '3':
+                        TestInput();
+                        break;
+                    case '4':
+                        TestEventsDirectWait();
+                        break;
+                    case '5':
+                        TestEventsCallback();
+                        break;
+                    case '6':
+                        TestPwm();
+                        break;
+                    case '7':
+                        TestAnalogIn();
+                        break;
+                    case '8':
+                        TestAnalogCallback(_board);
+                        break;
+                    case '9':
+                        TestSpi(_board);
+                        break;
+                    case '0':
+                        ScanDeviceAddressesOnI2cBus(_board);
+                        break;
+                    case 'h':
+                    case 'H':
+                        TestDht(_board);
+                        break;
+                    case 'b':
+                    case 'B':
+                        TestI2cBme680(_board);
+                        break;
+                    case 'f':
+                    case 'F':
+                        TestFrequency(_board);
+                        break;
+                    case 'a':
+                    case 'A':
                         {
-                            _ledPin = led;
-                        }
-                        else
-                        {
-                            Console.Write("You did not enter a valid number");
+                            var test = new RgbLedTest(_board);
+                            test.DoTest();
                         }
 
-                        Console.Write("Which pin to use for the button? ");
-                        input = Console.ReadLine();
-                        if (int.TryParse(input, NumberStyles.Integer, CultureInfo.CurrentCulture, out int button))
-                        {
-                            _buttonPin = button;
-                        }
-                        else
-                        {
-                            Console.Write("You did not enter a valid number");
-                        }
-
-                        Console.WriteLine($"Led-Pin: {_ledPin}. Button-Pin: {_buttonPin}");
-
-                        Console.WriteLine();
-                        Console.Write("Lowest Address for I2C bus scan? (Default: 0x03) ");
-                        input = Console.ReadLine()!;
-                        if (!int.TryParse(input.Substring(2), NumberStyles.HexNumber, CultureInfo.CurrentCulture, out _lowestI2cAddress))
-                        {
-                            _lowestI2cAddress = 3;
-                        }
-
-                        Console.Write("Highest Address for I2C bus scan? (Default: 0x77) ");
-                        input = Console.ReadLine()!;
-                        if (!int.TryParse(input.Substring(2), NumberStyles.HexNumber, CultureInfo.CurrentCulture, out _highestI2cAddress))
-                        {
-                            _highestI2cAddress = 0x77;
-                        }
-                    }
-
-                    break;
-                case 'i':
-                case 'I':
-                    BoardInformation();
-                    break;
-                case 'x':
-                case 'X':
-                    return false;
+                        break;
+                    case 'c':
+                    case 'C':
+                        ConfigurePins();
+                        break;
+                    case 'i':
+                    case 'I':
+                        BoardInformation();
+                        break;
+                    case 's':
+                    case 'S':
+                        SendBoardToSleep();
+                        break;
+                    case 'x':
+                    case 'X':
+                        return false;
+                }
+            }
+            catch (IOException x)
+            {
+                Console.WriteLine($"The command failed with the following error: {x.Message}");
             }
 
             return true;
         }
 
-        private static void TestFrequency(ArduinoBoard board)
+        private void TestAnalogCallback(ArduinoBoard board)
+        {
+            int analogPin = GetAnalogPin(board, _analogInputChannel);
+            var analogController = board.CreateAnalogController(0);
+            // Add this line for 3.3V boards, to get correct voltages.
+            // analogController.VoltageReference = ElectricPotential.FromVolts(3.3);
+            board.SetAnalogInputSamplingInterval(TimeSpan.FromMilliseconds(10));
+            var pin = analogController.OpenPin(analogPin);
+            pin.EnableAnalogValueChangedEvent(null, 0);
+
+            pin.ValueChanged += (sender, args) =>
+            {
+                if (args.PinNumber == analogPin)
+                {
+                    Console.WriteLine($"New voltage: {args.Value}.");
+                }
+            };
+
+            Console.WriteLine("Waiting for changes on the analog input");
+            while (!Console.KeyAvailable)
+            {
+                // Nothing to do
+                Thread.Sleep(100);
+            }
+
+            Console.ReadKey();
+            pin.DisableAnalogValueChangedEvent();
+            pin.Dispose();
+            analogController.Dispose();
+        }
+
+        private void ConfigurePins()
+        {
+            Console.WriteLine();
+            Console.Write("Which pin to use for the LED? ");
+            var input = Console.ReadLine();
+            if (int.TryParse(input, NumberStyles.Integer, CultureInfo.CurrentCulture, out int led))
+            {
+                _ledPin = led;
+            }
+            else
+            {
+                Console.WriteLine("You did not enter a valid number");
+            }
+
+            Console.Write("Which pin to use for the button? ");
+            input = Console.ReadLine();
+            if (int.TryParse(input, NumberStyles.Integer, CultureInfo.CurrentCulture, out int button))
+            {
+                _buttonPin = button;
+            }
+            else
+            {
+                Console.WriteLine("You did not enter a valid number");
+            }
+
+            Console.Write("Which analog channel to use as input? ");
+            input = Console.ReadLine();
+            if (int.TryParse(input, NumberStyles.Integer, CultureInfo.CurrentCulture, out int inputChannel))
+            {
+                _analogInputChannel = inputChannel;
+            }
+            else
+            {
+                Console.WriteLine("You did not enter a valid number");
+            }
+
+            int analogPin = GetAnalogPin(_board, _analogInputChannel);
+            if (analogPin < 0)
+            {
+                Console.WriteLine($"Warn: Analog channel A{_analogInputChannel} does not exist");
+            }
+
+            Console.WriteLine($"Led-Pin: {_ledPin}. Button-Pin: {_buttonPin}. Analog input channel A{_analogInputChannel} (pin {analogPin})");
+
+            Console.WriteLine();
+            Console.Write("Lowest Address for I2C bus scan? (Default: 0x03) ");
+            input = Console.ReadLine()!;
+            if (input.Length < 3 || !int.TryParse(input.Substring(2), NumberStyles.HexNumber, CultureInfo.CurrentCulture, out _lowestI2cAddress))
+            {
+                _lowestI2cAddress = 3;
+            }
+
+            Console.Write("Highest Address for I2C bus scan? (Default: 0x77) ");
+            input = Console.ReadLine()!;
+            if (input.Length < 3 || !int.TryParse(input.Substring(2), NumberStyles.HexNumber, CultureInfo.CurrentCulture, out _highestI2cAddress))
+            {
+                _highestI2cAddress = 0x77;
+            }
+        }
+
+        private void TestFrequency(ArduinoBoard board)
         {
             Console.Write("Which pin number to use? ");
             string? input = Console.ReadLine();
@@ -401,9 +435,9 @@ namespace Iot.Device.Arduino.Sample
             using (var pwm = _board.CreatePwmChannel(0, pin, 100, 0))
             {
                 Console.WriteLine("Now dimming LED. Press any key to exit");
+                pwm.Start();
                 while (!Console.KeyAvailable)
                 {
-                    pwm.Start();
                     for (double fadeValue = 0; fadeValue <= 1.0; fadeValue += 0.05)
                     {
                         // sets the value (range from 0 to 255):
@@ -424,7 +458,6 @@ namespace Iot.Device.Arduino.Sample
                 }
 
                 Console.ReadKey();
-                pwm.Stop();
             }
         }
 
@@ -460,9 +493,25 @@ namespace Iot.Device.Arduino.Sample
 
         private void TestAnalogIn()
         {
+            _board.SetAnalogInputSamplingInterval(TimeSpan.FromMilliseconds(20));
+            TimeSpan diditwork = TimeSpan.Zero;
+            try
+            {
+                diditwork = _board.GetAnalogInputSamplingInterval();
+            }
+            catch (IOException)
+            {
+                diditwork = TimeSpan.Zero;
+            }
+
+            if (diditwork != TimeSpan.FromMilliseconds(20))
+            {
+                Console.WriteLine("We are not able to query the sampling interval. Ensure the board runs ConfigurableFirmata 3.4 or newer");
+            }
+
             // Use Pin 6
             int gpio = _ledPin;
-            int analogPin = GetAnalogPin1(_board);
+            int analogPin = GetAnalogPin(_board, _analogInputChannel);
             var gpioController = _board.CreateGpioController();
             var analogController = _board.CreateAnalogController(0);
 
@@ -470,7 +519,7 @@ namespace Iot.Device.Arduino.Sample
             gpioController.OpenPin(gpio);
             gpioController.SetPinMode(gpio, PinMode.Output);
 
-            Console.WriteLine("Blinking GPIO6, based on analog input.");
+            Console.WriteLine($"Blinking GPIO{analogPin}, based on analog input on A{_analogInputChannel}.");
             while (!Console.KeyAvailable)
             {
                 ElectricPotential voltage = pin.ReadVoltage();
@@ -610,9 +659,66 @@ namespace Iot.Device.Arduino.Sample
             foreach (var pin in _board.SupportedPinConfigurations)
             {
                 Console.Write($"    {pin.Pin}: ");
-                Console.WriteLine(string.Join(", ", pin.PinModes.Select(x => x.Name)));
+                Console.WriteLine(string.Join(", ", pin.PinModes.Select(x =>
+                {
+                    if (x == SupportedMode.AnalogInput)
+                    {
+                        return $"{x.Name} ({pin.AnalogInputResolutionBits} Bits Resolution, channel A{pin.AnalogPinNumber})";
+                    }
+                    else if (x == SupportedMode.Pwm)
+                    {
+                        return $"{x.Name} ({pin.PwmResolutionBits} Bits Resolution)";
+                    }
+
+                    return x.Name;
+                })));
             }
         }
 
+        private void SendBoardToSleep()
+        {
+            // Sends the board to sleep mode
+            TimeSpan sleepDelay = TimeSpan.FromSeconds(5);
+            if (!_board.SetSystemVariable(SystemVariable.SleepModeInterruptEnable, _buttonPin, 1))
+            {
+                return;
+            }
+
+            if (!_board.SetSystemVariable(SystemVariable.EnterSleepMode, _buttonPin, (int)sleepDelay.TotalSeconds))
+            {
+                return;
+            }
+
+            Console.WriteLine("Board is soon entering sleep. Connection might drop now.");
+            Stopwatch sw = Stopwatch.StartNew();
+            while (sw.Elapsed < sleepDelay + sleepDelay)
+            {
+                Thread.Sleep(50);
+                var pings = _board.Ping(1);
+                if (pings[0] < TimeSpan.Zero)
+                {
+                    break;
+                }
+            }
+
+            sw.Restart();
+            Console.WriteLine("Board is now asleep. Waiting for wakeup");
+            while (true)
+            {
+                Thread.Sleep(50);
+                var pings = _board.Ping(1);
+                if (pings[0] >= TimeSpan.Zero)
+                {
+                    break;
+                }
+            }
+
+            Console.WriteLine("Board is answering again");
+            if (sw.Elapsed < TimeSpan.FromSeconds(2))
+            {
+                Console.WriteLine("That was to fast ... assuming a wrong interrupt was caught");
+                SendBoardToSleep();
+            }
+        }
     }
 }

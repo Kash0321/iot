@@ -20,7 +20,7 @@ These devices are controlled purely by GPIO (except Grove LCD RGB Backlight). Th
 Here is a Hello World example of how to consume this binding:
 
 ```csharp
-using (var lcd = new Lcd1602(18, 5, new int[]{6, 16, 20, 21})) //using 4 data pins
+using (var lcd = new Lcd1602(22, 17, new int[] { 25, 24, 23, 18 })) //using 4 data pins
 {
     lcd.Write("Hello World!");
 }
@@ -42,6 +42,18 @@ using LcdRgb lcd = new LcdRgb(new Size(16, 2), i2cLcdDevice, i2cRgbDevice);
     lcd.Write("Hello World!");
     lcd.SetBacklightColor(Color.Azure);
 }
+```
+
+AIP31068 based LCDs expose the same HD44780 compatible instruction set but require an extended
+initialization sequence. The `Aip31068Lcd` binding performs the necessary configuration and allows
+adjusting the display contrast:
+
+```csharp
+var i2cDevice = I2cDevice.Create(new I2cConnectionSettings(busId: 1, deviceAddress: 0x3E));
+using Aip31068Lcd lcd = new(i2cDevice);
+lcd.Clear();
+lcd.Write("Hello from AIP31068!");
+lcd.Contrast = 36; // optional: tune the contrast (0-63)
 ```
 
 PCF8574T/PCF8574AT Sample

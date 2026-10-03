@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>WeatherStation</RootNamespace>
     <EnableDefaultItems>false</EnableDefaultItems>
     <AssemblyName>WeatherStation</AssemblyName>
@@ -12,15 +12,17 @@
     <Compile Include="WeatherStation.cs" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="$(Configuration)=='Debug'">
     <ProjectReference Include="..\..\..\..\src\devices\Arduino\Arduino.csproj" />
     <ProjectReference Include="..\..\..\..\src\devices\Bmxx80\Bmxx80.csproj" />
+    <ProjectReference Include="..\..\..\..\src\devices\Button\Button.csproj" />
     <ProjectReference Include="..\..\..\..\src\devices\CharacterLcd\CharacterLcd.csproj" />
     <ProjectReference Include="..\..\..\..\src\devices\Common\Common.csproj" />
     <ProjectReference Include="..\..\..\..\src\System.Device.Gpio\System.Device.Gpio.csproj" />
   </ItemGroup>
-
- 
-  
+  <ItemGroup Condition="$(Configuration)=='Release'">
+    <ProjectReference Include="..\..\..\..\src\System.Device.Gpio\System.Device.Gpio.csproj"/>
+    <ProjectReference Include="..\..\..\..\src\Iot.Device.Bindings\Iot.Device.Bindings.csproj"/>
+  </ItemGroup>
 
 </Project>

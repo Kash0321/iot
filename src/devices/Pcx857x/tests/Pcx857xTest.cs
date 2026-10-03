@@ -42,7 +42,7 @@ namespace Iot.Device.Pcx857x.Tests
             {
                 Device = device;
                 ChipMock = chipMock;
-                Controller = new GpioController(PinNumberingScheme.Logical, Device);
+                Controller = new GpioController(Device);
             }
         }
 
@@ -161,7 +161,9 @@ namespace Iot.Device.Pcx857x.Tests
                 return PinValue.Low;
             }
 
-            public void Read(Span<PinValuePair> pinValues)
+            protected override void Toggle(int pinNumber) => Write(pinNumber, !Read(pinNumber));
+
+            protected override void Read(Span<PinValuePair> pinValues)
             {
                 for (int i = 0; i < pinValues.Length; i++)
                 {
@@ -180,7 +182,7 @@ namespace Iot.Device.Pcx857x.Tests
                 _pinValues[pinNumber] = value;
             }
 
-            public void Write(ReadOnlySpan<PinValuePair> pinValues)
+            protected override void Write(ReadOnlySpan<PinValuePair> pinValues)
             {
                 foreach ((int pin, PinValue value) in pinValues)
                 {
@@ -198,9 +200,6 @@ namespace Iot.Device.Pcx857x.Tests
                     $"Failed to get mode for pin {pinNumber} since it is not opened.");
 
             protected override bool IsPinModeSupported(int pinNumber, PinMode mode) => true;
-
-            protected override int ConvertPinNumberToLogicalNumberingScheme(int pinNumber) =>
-                throw new NotImplementedException();
 
             protected override WaitForEventResult WaitForEvent(int pinNumber, PinEventTypes eventTypes,
                 CancellationToken cancellationToken) => throw new NotImplementedException();

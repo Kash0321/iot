@@ -1,6 +1,8 @@
 ﻿// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
+using System.Device.Gpio.Drivers;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,16 +15,40 @@ namespace System.Device.Gpio;
 public abstract class GpioDriver : IDisposable
 {
     /// <summary>
+    /// Finalizer to clean up unmanaged resources
+    /// </summary>
+    ~GpioDriver()
+    {
+        Dispose(false);
+    }
+
+    /// <summary>
     /// The number of pins provided by the driver.
     /// </summary>
     protected internal abstract int PinCount { get; }
 
     /// <summary>
-    /// Converts a board pin number to the driver's logical numbering scheme.
+    /// Tries to call the provided functor (typically a constructor call) and checks whether it throws an exception.
     /// </summary>
-    /// <param name="pinNumber">The board pin number to convert.</param>
-    /// <returns>The pin number in the driver's logical numbering scheme.</returns>
-    protected internal abstract int ConvertPinNumberToLogicalNumberingScheme(int pinNumber);
+    /// <typeparam name="T">The type of the return object</typeparam>
+    /// <param name="creationAction">A constructor call</param>
+    /// <param name="driver">The driver object on success</param>
+    /// <returns>True on success, false otherwise</returns>
+    public static bool TryCreate<T>(Func<T> creationAction, [NotNullWhen(true)] out T? driver)
+        where T : class, IDisposable
+    {
+        try
+        {
+            driver = creationAction();
+        }
+        catch (Exception x) when (x is PlatformNotSupportedException || x is DllNotFoundException)
+        {
+            driver = null;
+            return false;
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Opens a pin in order for it to be ready to use.
@@ -83,11 +109,50 @@ public abstract class GpioDriver : IDisposable
     protected internal abstract PinValue Read(int pinNumber);
 
     /// <summary>
+    /// Read the given pins with the given pin numbers.
+    /// </summary>
+    /// <remarks>
+    /// The default implementation calls <see cref="Read(int)"/> for each pin in the array.
+    /// where possible, drivers should override this method to provide a more efficient implementation.
+    /// </remarks>
+    /// <param name="pinValuePairs">The pin/value pairs to read.</param>
+    protected internal virtual void Read(Span<PinValuePair> pinValuePairs)
+    {
+        for (int i = 0; i < pinValuePairs.Length; i++)
+        {
+            int pin = pinValuePairs[i].PinNumber;
+            pinValuePairs[i] = new PinValuePair(pin, Read(pin));
+        }
+    }
+
+    /// <summary>
+    /// Toggle the current value of a pin.
+    /// </summary>
+    /// <param name="pinNumber">The pin number in the driver's logical numbering scheme.</param>
+    protected internal virtual void Toggle(int pinNumber) => Write(pinNumber, !Read(pinNumber));
+
+    /// <summary>
     /// Writes a value to a pin.
     /// </summary>
     /// <param name="pinNumber">The pin number in the driver's logical numbering scheme.</param>
     /// <param name="value">The value to be written to the pin.</param>
     protected internal abstract void Write(int pinNumber, PinValue value);
+
+    /// <summary>
+    /// Write the given pins with the given values.
+    /// </summary>
+    /// <remarks>
+    /// The default implementation calls <see cref="Write(int, PinValue)"/> for each pin in the array.
+    /// where possible, drivers should override this method to provide a more efficient implementation.
+    /// </remarks>
+    /// <param name="pinValuePairs">The pin/value pairs to write.</param>
+    protected internal virtual void Write(ReadOnlySpan<PinValuePair> pinValuePairs)
+    {
+        for (int i = 0; i < pinValuePairs.Length; i++)
+        {
+            Write(pinValuePairs[i].PinNumber, pinValuePairs[i].PinValue);
+        }
+    }
 
     /// <summary>
     /// Blocks execution until an event of type eventType is received or a cancellation is requested.
@@ -141,5 +206,30 @@ public abstract class GpioDriver : IDisposable
     protected virtual void Dispose(bool disposing)
     {
         // Nothing to do in base class.
+    }
+
+    /// <summary>
+    /// Query information about a component and its children.
+    /// </summary>
+    /// <returns>A tree of <see cref="ComponentInformation"/> instances.</returns>
+    /// <remarks>
+    /// The returned data structure (or rather, its string representation) can be used to diagnose problems with incorrect driver types or
+    /// other system configuration problems.
+    /// This method is currently reserved for debugging purposes. Its behavior its and signature are subject to change.
+    /// </remarks>
+    public virtual ComponentInformation QueryComponentInformation()
+    {
+        return new ComponentInformation(this, "Gpio Driver");
+    }
+
+    /// <summary>
+    /// Gets information about the current GPIO chip.
+    /// A GPIO controller may organize pins into various groups or even different hardware modules.
+    /// </summary>
+    /// <returns>An instance of the <see cref="GpioChipInfo"/> record</returns>
+    /// <exception cref="NotSupportedException">The current driver does not support this method</exception>
+    public virtual GpioChipInfo GetChipInfo()
+    {
+        throw new NotSupportedException();
     }
 }

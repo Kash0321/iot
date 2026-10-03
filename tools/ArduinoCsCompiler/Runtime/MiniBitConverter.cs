@@ -2,6 +2,7 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Runtime.CompilerServices;
 using Iot.Device.Arduino;
 
 namespace ArduinoCsCompiler.Runtime
@@ -9,7 +10,7 @@ namespace ArduinoCsCompiler.Runtime
     [ArduinoReplacement(typeof(BitConverter), true)]
     internal class MiniBitConverter
     {
-        // This must be set to the endianess of the target platform, but currently all Microcontrollers that are supported seem to use little endian
+        // This must be set to the endianness of the target platform, but currently all Microcontrollers that are supported seem to use little endian
         public static readonly bool IsLittleEndian = true;
 
         [ArduinoImplementation("BitConverterSingleToInt32Bits")]
@@ -74,6 +75,12 @@ namespace ArduinoCsCompiler.Runtime
 
         [ArduinoImplementation("BitConverterUInt16BitsToHalf")]
         public static Half UInt16BitsToHalf(UInt16 value)
+        {
+            throw new NotImplementedException();
+        }
+
+        [ArduinoImplementation("BitCountUint32BitsToSingle")]
+        public static float UInt32BitsToSingle(uint value)
         {
             throw new NotImplementedException();
         }
