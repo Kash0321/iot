@@ -14,12 +14,20 @@ It consists of multiple devices. Currently supported devices:
 * Two H-bridge motor drivers (up to 200mA per channel; soft PWM control)
 * Four buffered 5V tolerant inputs
 * Four open collector 5V outputs (up to 500mA in total across the four outputs)
+* Four analog inputs (ADS1015, from 0V to 5V)
 
 ## Notes
 
-Capacitive touchpads, analog inputs, and 3.3v breakout not supported yet.
+Capacitive touchpads and 3.3v breakout not supported yet.
 
 The pins of the inputs and outputs are opened the first time they are used, not when `ExplorerHat` is created. Inputs and outputs that are not used can be used by other bindings, with their `Pin` property (for example, an HC-SR04 distance sensor with its trigger on an output and its echo on an input). When `ExplorerHat` is disposed, it switches off the outputs it used and closes only the pins it opened.
+
+The analog inputs use I2C bus 1, which is opened the first time an analog input is read. To use another bus, or to share it with other devices, pass it to the constructor:
+
+```csharp
+using I2cBus bus = I2cBus.Create(1);
+using ExplorerHat hat = new(new GpioController(), bus, shouldDispose: false);
+```
 
 ## Usage
 
@@ -129,6 +137,31 @@ hat.Outputs.One.Off();
 
 // Check the state of an output
 Console.WriteLine($"Output 1 is {(hat.Outputs.One.IsOn ? "ON" : "OFF")}");
+```
+
+### Analog inputs
+
+The analog inputs are measured by an ADS1015 converter (I2C address 0x48) powered at 5V: each input accepts from 0V to 5V, with a resolution of 3mV. The converter measures once each time an input is read. An input with nothing connected does not read 0V: its value is not defined.
+
+| Analog input | ADS1015 channel |
+|---|---|
+| `hat.Analog.One` | 3 |
+| `hat.Analog.Two` | 2 |
+| `hat.Analog.Three` | 1 |
+| `hat.Analog.Four` | 0 |
+
+```csharp
+// Read one analog input
+ElectricPotential voltage = hat.Analog.One.ReadVoltage();
+Console.WriteLine($"Analog 1: {voltage.Volts:0.000} V");
+
+// Read all the analog inputs
+int number = 0;
+foreach (var input in hat.Analog)
+{
+    number++;
+    Console.WriteLine($"Analog {number}: {input.ReadVoltage().Volts:0.000} V");
+}
 ```
 
 ### Motors
