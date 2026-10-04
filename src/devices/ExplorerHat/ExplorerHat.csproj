@@ -4,6 +4,7 @@
     <EnableDefaultItems>false</EnableDefaultItems>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../Ads1115/Ads1115.csproj" />
     <ProjectReference Include="../DCMotor/DCMotor.csproj" />
     <Compile Include="*.cs" />
     <None Include="README.md" />

@@ -78,6 +78,20 @@ foreach (var output in hat.Outputs)
     output.Off();
 }
 
+// Analog inputs: read each analog input five times, once per second
+for (int reading = 1; reading <= 5; reading++)
+{
+    int number = 0;
+    foreach (var input in hat.Analog)
+    {
+        number++;
+        Console.Write($"Analog {number}: {input.ReadVoltage().Volts:0.000} V  ");
+    }
+
+    Console.WriteLine();
+    Thread.Sleep(1000);
+}
+
 // Motors
 // Forwards full speed
 hat.Motors.Forwards(1);
